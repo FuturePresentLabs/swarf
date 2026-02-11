@@ -721,20 +721,25 @@ impl Parser {
     fn parse_setup_block(&mut self) -> Result<SetupBlock> {
         self.consume(Token::Setup)?;
         self.consume(Token::LBrace)?;
-        
+
         let mut zero = ZeroConfig {
             x_ref: XRef::Left,
             y_ref: YRef::Front,
             z_ref: ZRef::Top,
         };
+        let mut material = None;
         let mut z_min = None;
         let mut y_limit = None;
-        
+
         while self.peek() != Some(&Token::RBrace) {
             match self.peek() {
                 Some(Token::Zero) => {
                     self.advance();
                     zero = self.parse_zero_config()?;
+                }
+                Some(Token::Material) => {
+                    self.advance();
+                    material = Some(self.expect_string()?);
                 }
                 Some(Token::ZMin) => {
                     self.advance();
@@ -745,17 +750,18 @@ impl Parser {
                     y_limit = Some(self.expect_number()?);
                 }
                 _ => {
-                    return Err(self.error("expected 'zero', 'z-min', or 'y-limit' in setup block"));
+                    return Err(self.error("expected 'zero', 'material', 'z-min', or 'y-limit' in setup block"));
                 }
             }
-            
+
             self.skip_newlines();
         }
-        
+
         self.consume(Token::RBrace)?;
-        
+
         Ok(SetupBlock {
             zero,
+            material,
             z_min,
             y_limit,
         })

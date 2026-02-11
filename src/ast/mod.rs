@@ -239,6 +239,7 @@ pub struct StockDef {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetupBlock {
     pub zero: ZeroConfig,
+    pub material: Option<String>, // Material grade for Black Book lookup
     pub z_min: Option<f64>,      // Hard Z floor - do not go below
     pub y_limit: Option<f64>,    // Y travel limit (negative = behind tool)
 }

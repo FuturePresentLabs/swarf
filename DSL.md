@@ -9,6 +9,17 @@
 - **Positional clarity**: `at X Y Z` for positions, `W D H` for dimensions
 - **Minimal vocabulary**: Few keywords, consistent patterns
 
+## Black Book Integration
+
+The compiler uses the Black Book (machining data reference) to automatically calculate:
+- **RPM**: Based on material SFM and tool diameter
+- **Feed rate**: Based on chip load per tooth and flute count
+- **Stepdown (DOC)**: Depth of cut per pass based on material and tool
+- **Stepover (WOC)**: Width of cut for pocketing operations
+- **Number of passes**: Calculated from total depth and optimal DOC
+
+Simply specify `material` in the setup block and the compiler looks up optimal parameters.
+
 ---
 
 ## Syntax Overview

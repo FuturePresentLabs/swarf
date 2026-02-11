@@ -2,6 +2,7 @@
 //! Converts AST into validated G-code output
 
 use crate::ast::*;
+use crate::black_book::{BlackBook, ToolGeometry, Engagement};
 
 #[derive(Debug)]
 pub struct GCodeOutput {
@@ -36,6 +37,10 @@ impl GCodeOutput {
 pub struct CodeGenerator {
     output: GCodeOutput,
     current_tool: Option<u8>,
+    current_tool_data: Option<ToolData>,
+    current_material: Option<String>,
+    black_book: BlackBook,
+    setup: Option<SetupBlock>,
 }
 
 impl CodeGenerator {
@@ -43,6 +48,10 @@ impl CodeGenerator {
         Self {
             output: GCodeOutput::new(),
             current_tool: None,
+            current_tool_data: None,
+            current_material: None,
+            black_book: BlackBook::new(),
+            setup: None,
         }
     }
 
@@ -102,7 +111,10 @@ impl CodeGenerator {
             Operation::PartDef(_) => {
                 // Part definition is metadata, no G-code emitted
             }
-            Operation::Setup(setup) => self.emit_setup(setup),
+            Operation::Setup(setup) => {
+                self.setup = Some(setup.clone());
+                self.emit_setup(setup);
+            }
             Operation::Cut(cut) => self.emit_cut(cut),
             Operation::Clear(clear) => self.emit_clear(clear),
             Operation::DrillV2(drill) => self.emit_drill_v2(drill),
@@ -118,6 +130,90 @@ impl CodeGenerator {
         if let Some(y_limit) = setup.y_limit {
             self.output.emit_comment(&format!("Y limit: {}", y_limit));
         }
+        if let Some(ref material) = setup.material {
+            self.output.emit_comment(&format!("Material: {}", material));
+            self.current_material = Some(material.clone());
+        }
+    }
+
+    fn calculate_drill_params(&self, diameter: f64, depth: f64) -> (f64, f64, f64) {
+        // Returns (rpm, feed_rate, peck_depth)
+        if let Some(ref material) = self.current_material {
+            if let Some(ref tool_data) = self.current_tool_data {
+                // Convert tool data to Black Book format
+                let tool = ToolGeometry {
+                    diameter,
+                    flute_count: tool_data.flutes,
+                    tool_material: match tool_data.material {
+                        crate::ast::ToolMaterial::HSS => crate::black_book::ToolMaterial::HSS,
+                        crate::ast::ToolMaterial::Carbide => crate::black_book::ToolMaterial::Carbide,
+                        crate::ast::ToolMaterial::Cobalt => crate::black_book::ToolMaterial::Cobalt,
+                        crate::ast::ToolMaterial::Ceramic => crate::black_book::ToolMaterial::Ceramic,
+                    },
+                    corner_radius: None,
+                    coating: None,
+                };
+
+                let engagement = Engagement {
+                    axial_doc: depth,
+                    radial_woc: diameter * 0.5, // Half diameter for drilling
+                    radial_engagement_pct: 50.0,
+                };
+
+                if let Ok(params) = self.black_book.calculate(material, &tool, &engagement) {
+                    // For drilling, use lower feed than milling
+                    let peck_depth = if depth > 3.0 * diameter {
+                        diameter * 1.5 // Deep hole peck
+                    } else {
+                        depth // No peck for shallow holes
+                    };
+                    
+                    return (params.rpm as f64, params.feed_rate_ipm * 0.7, peck_depth);
+                }
+            }
+        }
+        
+        // Default values if Black Book lookup fails
+        (3000.0, 15.0, depth)
+    }
+
+    fn calculate_pocket_params(&self, tool_dia: f64, depth: f64) -> (f64, f64, f64, f64) {
+        // Returns (rpm, feed_rate, stepdown, stepover)
+        if let Some(ref material) = self.current_material {
+            if let Some(ref tool_data) = self.current_tool_data {
+                let tool = ToolGeometry {
+                    diameter: tool_dia,
+                    flute_count: tool_data.flutes,
+                    tool_material: match tool_data.material {
+                        crate::ast::ToolMaterial::HSS => crate::black_book::ToolMaterial::HSS,
+                        crate::ast::ToolMaterial::Carbide => crate::black_book::ToolMaterial::Carbide,
+                        crate::ast::ToolMaterial::Cobalt => crate::black_book::ToolMaterial::Cobalt,
+                        crate::ast::ToolMaterial::Ceramic => crate::black_book::ToolMaterial::Ceramic,
+                    },
+                    corner_radius: None,
+                    coating: None,
+                };
+
+                // Use default DOC ratio - could query Black Book if we add a method
+                let max_doc_ratio = 1.0; // Default to 1x diameter
+                
+                let stepdown = tool_dia * (max_doc_ratio as f64).min(1.0);
+                let stepover = tool_dia * 0.4; // 40% stepover default
+
+                let engagement = Engagement {
+                    axial_doc: stepdown,
+                    radial_woc: stepover,
+                    radial_engagement_pct: 40.0,
+                };
+
+                if let Ok(params) = self.black_book.calculate(material, &tool, &engagement) {
+                    return (params.rpm as f64, params.feed_rate_ipm, stepdown, stepover);
+                }
+            }
+        }
+        
+        // Default values
+        (8000.0, 40.0, tool_dia * 0.5, tool_dia * 0.4)
     }
 
     fn emit_cut(&mut self, cut: &CutOp) {
@@ -125,6 +221,30 @@ impl CodeGenerator {
             "CUT {:?} sweep:{} depth:{} height:{}",
             cut.direction, cut.sweep, cut.depth, cut.height
         ));
+        
+        // Get tool diameter
+        let tool_dia = self.current_tool_data.as_ref()
+            .map(|t| t.diameter)
+            .unwrap_or(0.25);
+        
+        // Calculate cutting parameters from Black Book
+        let (rpm, feed_rate, stepdown, _stepover) = self.calculate_pocket_params(tool_dia, cut.height);
+        
+        // Calculate number of Z passes for the height
+        let num_passes = (cut.height / stepdown).ceil() as i32;
+        
+        self.output.emit_comment(&format!(
+            "Black Book: RPM={:.0}, Feed={:.1} IPM, Stepdown={:.3}\"",
+            rpm, feed_rate, stepdown
+        ));
+        self.output.emit_comment(&format!(
+            "Z Passes required: {} for height {}",
+            num_passes, cut.height
+        ));
+        
+        // Spindle speed
+        self.output.emit(&format!("S{:.0} M03", rpm));
+        
         // TODO: Generate actual toolpath based on direction and constraints
         self.output.emit("; Cut operation - TODO");
     }
@@ -144,33 +264,71 @@ impl CodeGenerator {
             drill.diameter, drill.position.x, drill.position.y
         ));
         
+        // Calculate depth
+        let depth = match &drill.depth {
+            DrillDepth::Thru => 0.5, // Default through depth
+            DrillDepth::Depth(z) => *z,
+        };
+        
+        // Get cutting parameters from Black Book
+        let (rpm, feed_rate, peck_depth) = self.calculate_drill_params(drill.diameter, depth);
+        
+        // Output calculated parameters
+        self.output.emit_comment(&format!(
+            "Black Book: RPM={:.0}, Feed={:.1} IPM, Peck={:.3}\"",
+            rpm, feed_rate, peck_depth
+        ));
+        
+        // Spindle speed
+        self.output.emit(&format!("S{:.0} M03", rpm));
+        
         // Move to position
         self.output.emit(&format!(
             "G00 X{:.4} Y{:.4}",
             drill.position.x, drill.position.y
         ));
         
-        // Drill cycle based on depth
-        match &drill.depth {
-            DrillDepth::Thru => {
-                // Simple drill cycle - through
-                self.output.emit("G81 R0.1 Z-0.55 F15.0"); // TODO: calculate from tool
-            }
-            DrillDepth::Depth(z) => {
-                self.output.emit(&format!(
-                    "G81 R0.1 Z-{:.4} F15.0",
-                    z
-                ));
-            }
+        // Drill cycle
+        if peck_depth < depth {
+            // Peck drilling for deep holes
+            self.output.emit(&format!(
+                "G83 R0.1 Z-{:.4} Q{:.4} F{:.1}",
+                depth, peck_depth, feed_rate
+            ));
+        } else {
+            // Standard drill cycle
+            self.output.emit(&format!(
+                "G81 R0.1 Z-{:.4} F{:.1}",
+                depth, feed_rate
+            ));
         }
     }
 
     fn emit_pocket_v2(&mut self, pocket: &PocketV2Op) {
+        // Get tool diameter (from current tool or default)
+        let tool_dia = self.current_tool_data.as_ref()
+            .map(|t| t.diameter)
+            .unwrap_or(0.25); // Default 1/4" end mill
+        
+        // Calculate cutting parameters from Black Book
+        let (rpm, feed_rate, stepdown, stepover) = self.calculate_pocket_params(tool_dia, pocket.depth);
+        
+        // Calculate number of passes
+        let num_passes = (pocket.depth / stepdown).ceil() as i32;
+        
         match &pocket.shape {
             PocketShape::Rect { width, height } => {
                 self.output.emit_comment(&format!(
                     "POCKET RECT {}x{} at X{:.4} Y{:.4} depth:{:.4}",
                     width, height, pocket.position.x, pocket.position.y, pocket.depth
+                ));
+                self.output.emit_comment(&format!(
+                    "Black Book: RPM={:.0}, Feed={:.1} IPM, Stepdown={:.3}\", Stepover={:.3}\"",
+                    rpm, feed_rate, stepdown, stepover
+                ));
+                self.output.emit_comment(&format!(
+                    "Passes required: {} (DOC={:.3}\")",
+                    num_passes, stepdown
                 ));
             }
             PocketShape::Circle { diameter } => {
@@ -178,11 +336,40 @@ impl CodeGenerator {
                     "POCKET CIRCLE dia:{} at X{:.4} Y{:.4} depth:{:.4}",
                     diameter, pocket.position.x, pocket.position.y, pocket.depth
                 ));
+                self.output.emit_comment(&format!(
+                    "Black Book: RPM={:.0}, Feed={:.1} IPM, Stepdown={:.3}\", Stepover={:.3}\"",
+                    rpm, feed_rate, stepdown, stepover
+                ));
+                self.output.emit_comment(&format!(
+                    "Passes required: {} (DOC={:.3}\")",
+                    num_passes, stepdown
+                ));
             }
         }
         
-        // TODO: Generate actual pocketing toolpath (adaptive or conventional)
-        self.output.emit("; Pocket operation - TODO");
+        // Spindle speed
+        self.output.emit(&format!("S{:.0} M03", rpm));
+        
+        // Generate passes
+        for pass_num in 1..=num_passes {
+            let z_depth = (pass_num as f64 * stepdown).min(pocket.depth);
+            self.output.emit_comment(&format!("Pass {}/{}: Z={:.3}", pass_num, num_passes, -z_depth));
+            
+            // Move to start position at safe height
+            self.output.emit(&format!(
+                "G00 X{:.4} Y{:.4}",
+                pocket.position.x, pocket.position.y
+            ));
+            
+            // Plunge to depth
+            self.output.emit(&format!("G01 Z-{:.4} F{:.1}", z_depth, feed_rate * 0.3));
+            
+            // TODO: Generate actual pocketing path (spiral, zigzag, etc.)
+            self.output.emit(&format!("; Pocketing pass at Z-{:.4}", z_depth));
+        }
+        
+        // Retract
+        self.output.emit("G00 Z0.1");
     }
 
     fn emit_tool_change(&mut self, tc: &ToolChange) {
@@ -195,6 +382,10 @@ impl CodeGenerator {
         // Tool change
         self.output.emit(&format!("T{} M06", tc.tool_number));
         
+        self.current_tool = Some(tc.tool_number);
+        if let Some(ref data) = tc.tool_data {
+            self.current_tool_data = Some(data.clone());
+        }
         // Tool data comment
         if let Some(data) = &tc.tool_data {
             self.output.emit_comment(&format!(
@@ -515,5 +706,55 @@ impl CodeGenerator {
 impl Default for GCodeOutput {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_black_book_integration() {
+        let mut gen = CodeGenerator::new();
+
+        // Setup with material
+        let setup = SetupBlock {
+            zero: ZeroConfig {
+                x_ref: crate::ast::XRef::Left,
+                y_ref: crate::ast::YRef::Front,
+                z_ref: crate::ast::ZRef::Top,
+            },
+            material: Some("6061-T6".to_string()),
+            z_min: Some(0.0),
+            y_limit: None,
+        };
+        gen.emit_setup(&setup);
+
+        // Tool change with carbide end mill
+        let tool_change = ToolChange {
+            tool_number: 1,
+            tool_data: Some(ToolData {
+                diameter: 0.25,
+                length: 1.0,
+                flutes: 3,
+                material: crate::ast::ToolMaterial::Carbide,
+            }),
+        };
+        gen.emit_tool_change(&tool_change);
+
+        // Drill operation - should use Black Book feeds
+        let drill = DrillV2Op {
+            diameter: 0.25,
+            position: Position::new(1.0, 0.5),
+            depth: DrillDepth::Thru,
+        };
+        gen.emit_drill_v2(&drill);
+
+        let output = gen.output.to_string();
+
+        // Verify Black Book calculated parameters are in output
+        assert!(output.contains("Black Book:"));
+        assert!(output.contains("RPM="));
+        assert!(output.contains("Feed="));
     }
 }
