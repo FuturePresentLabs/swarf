@@ -214,12 +214,20 @@ Features: Live reload, pan/zoom, 2D top-down view
 
 ### 3D WASM Visualizer
 
-Pure Rust + WebGL + WASM in `swarf-viz-wasm/`:
+Pure Rust + WebGL + WASM. Built automatically with `viz-3d` feature:
 
 ```bash
-cd swarf-viz-wasm
-wasm-pack build --target web --out-dir pkg
-python3 -m http.server 8080
+# Install wasm-pack if needed
+cargo install wasm-pack
+
+# Build with 3D viz support
+cargo build --release --features viz-3d
+
+# Run (uses 3D by default)
+./target/release/swarf --viz output.nc
+
+# Force 2D view
+./target/release/swarf --viz --2d output.nc
 ```
 
 **3D Features:**
@@ -227,6 +235,13 @@ python3 -m http.server 8080
 - Color-coded: grey (rapid), amber (cut), cyan (arc)
 - Orbit/pan/zoom camera
 - Drag & drop file loading
+
+Or build manually from `swarf-viz-wasm/`:
+```bash
+cd swarf-viz-wasm
+wasm-pack build --target web --out-dir pkg
+python3 -m http.server 8080
+```
 
 ## Project Structure
 
