@@ -4,6 +4,9 @@ mod parser;
 mod codegen;
 mod validator;
 
+#[cfg(feature = "viz")]
+mod viz;
+
 use std::fs;
 
 #[derive(Debug)]
@@ -25,20 +28,64 @@ impl From<parser::ParseError> for Error {
     }
 }
 
-fn main() -> Result<(), Error> {
+fn main() {
     let args: Vec<String> = std::env::args().collect();
     
     if args.len() < 2 {
-        eprintln!("Usage: gcode-dsl <input.dsl> [output.nc]");
-        eprintln!("");
-        eprintln!("Example:");
-        eprintln!("  gcode-dsl program.dsl output.nc");
+        print_usage();
         std::process::exit(1);
     }
 
-    let input_path = &args[1];
-    let output_path = args.get(2).map(|s| s.as_str()).unwrap_or("output.nc");
+    let command = &args[1];
+    
+    match command.as_str() {
+        "--viz" | "viz" => {
+            #[cfg(feature = "viz")]
+            {
+                if args.len() < 3 {
+                    eprintln!("Usage: swarf --viz <gcode-file.nc>");
+                    std::process::exit(1);
+                }
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(viz::runviz(args[2].clone()));
+            }
+            #[cfg(not(feature = "viz"))]
+            {
+                eprintln!("viz feature not enabled. Build with: cargo build --features viz");
+                std::process::exit(1);
+            }
+        }
+        "--help" | "-h" | "help" => {
+            print_usage();
+        }
+        _ => {
+            // Compile mode: swarf input.dsl [output.nc]
+            let input_path = command;
+            let output_path = args.get(2).map(|s| s.as_str()).unwrap_or("output.nc");
+            
+            if let Err(e) = compile(input_path, output_path) {
+                eprintln!("Error: {:?}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+}
 
+fn print_usage() {
+    println!("swarf - Natural language to G-code compiler");
+    println!();
+    println!("Usage:");
+    println!("  swarf <input.dsl> [output.nc]  Compile DSL to G-code");
+    println!("  swarf --viz <file.nc>          Start visualizer on http://localhost:3030");
+    println!("  swarf --help                   Show this help");
+    println!();
+    println!("Examples:");
+    println!("  swarf program.dsl output.nc");
+    println!("  swarf examples/bracket.dsl");
+    println!("  swarf --viz output.nc");
+}
+
+fn compile(input_path: &str, output_path: &str) -> Result<(), Error> {
     // Read input
     let source = fs::read_to_string(input_path)?;
     
