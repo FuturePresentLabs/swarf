@@ -4,6 +4,7 @@ mod parser;
 mod codegen;
 mod validator;
 pub mod black_book;
+pub mod post;
 
 #[cfg(feature = "viz")]
 mod viz;
@@ -31,14 +32,14 @@ impl From<parser::ParseError> for Error {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    
+
     if args.len() < 2 {
         print_usage();
         std::process::exit(1);
     }
 
     let command = &args[1];
-    
+
     match command.as_str() {
         "--viz" | "viz" => {
             #[cfg(feature = "viz")]
@@ -59,12 +60,61 @@ fn main() {
         "--help" | "-h" | "help" => {
             print_usage();
         }
+        "--list-posts" => {
+            println!("Available post-processors:");
+            println!("  generic   - Fanuc-compatible (default)");
+            println!("  mach3     - Mach3/Mach4 (expands canned cycles)");
+            println!("  linuxcnc  - LinuxCNC");
+            println!("  haas      - Haas");
+        }
         _ => {
-            // Compile mode: swarf input.dsl [output.nc]
-            let input_path = command;
-            let output_path = args.get(2).map(|s| s.as_str()).unwrap_or("output.nc");
-            
-            if let Err(e) = compile(input_path, output_path) {
+            // Parse options
+            let mut post_type = post::PostProcessorType::Generic;
+            let mut input_path = None;
+            let mut output_path = "output.nc";
+
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--post" | "-p" => {
+                        if i + 1 < args.len() {
+                            post_type = match args[i + 1].as_str() {
+                                "mach3" => post::PostProcessorType::Mach3,
+                                "linuxcnc" => post::PostProcessorType::LinuxCNC,
+                                "haas" => post::PostProcessorType::Haas,
+                                _ => post::PostProcessorType::Generic,
+                            };
+                            i += 2;
+                        } else {
+                            eprintln!("Error: --post requires an argument (mach3, linuxcnc, haas)");
+                            std::process::exit(1);
+                        }
+                    }
+                    "-o" => {
+                        if i + 1 < args.len() {
+                            output_path = &args[i + 1];
+                            i += 2;
+                        } else {
+                            eprintln!("Error: -o requires an output path");
+                            std::process::exit(1);
+                        }
+                    }
+                    arg => {
+                        if input_path.is_none() && !arg.starts_with('-') {
+                            input_path = Some(arg);
+                        }
+                        i += 1;
+                    }
+                }
+            }
+
+            let input_path = input_path.unwrap_or_else(|| {
+                eprintln!("Error: No input file specified");
+                print_usage();
+                std::process::exit(1);
+            });
+
+            if let Err(e) = compile_with_post(input_path, output_path, post_type) {
                 eprintln!("Error: {:?}", e);
                 std::process::exit(1);
             }
@@ -76,27 +126,40 @@ fn print_usage() {
     println!("swarf - Natural language to G-code compiler");
     println!();
     println!("Usage:");
-    println!("  swarf <input.dsl> [output.nc]  Compile DSL to G-code");
-    println!("  swarf --viz <file.nc>          Start visualizer on http://localhost:3030");
-    println!("  swarf --help                   Show this help");
+    println!("  swarf <input.dsl> [output.nc]          Compile DSL to G-code");
+    println!("  swarf <input.dsl> --post <type>        Use post-processor");
+    println!("  swarf --viz <file.nc>                  Start visualizer on http://localhost:3030");
+    println!("  swarf --list-posts                     List available post-processors");
+    println!("  swarf --help                           Show this help");
+    println!();
+    println!("Post-processors:");
+    println!("  generic   - Fanuc-compatible (default)");
+    println!("  mach3     - Mach3/Mach4 (expands canned cycles)");
+    println!("  linuxcnc  - LinuxCNC");
+    println!("  haas      - Haas");
     println!();
     println!("Examples:");
     println!("  swarf program.dsl output.nc");
+    println!("  swarf program.dsl --post mach3 -o output.nc");
     println!("  swarf examples/bracket.dsl");
     println!("  swarf --viz output.nc");
 }
 
 fn compile(input_path: &str, output_path: &str) -> Result<(), Error> {
+    compile_with_post(input_path, output_path, post::PostProcessorType::Generic)
+}
+
+fn compile_with_post(input_path: &str, output_path: &str, post_type: post::PostProcessorType) -> Result<(), Error> {
     // Read input
     let source = fs::read_to_string(input_path)?;
-    
+
     // Lex
     let tokens = lexer::lex(&source);
-    
+
     // Parse
     let mut parser = parser::Parser::new(tokens);
     let program = parser.parse()?;
-    
+
     // Validate
     let validator = validator::Validator::new();
     if let Err(errors) = validator.validate_program(&program) {
@@ -106,16 +169,21 @@ fn compile(input_path: &str, output_path: &str) -> Result<(), Error> {
         }
         return Err(Error::Validation(vec![]));
     }
-    
+
     // Generate G-code
     let mut codegen = codegen::CodeGenerator::new();
-    let gcode = codegen.generate(&program);
-    
+    let gcode_output = codegen.generate_output(&program);
+
+    // Apply post-processor
+    let processor = post_type.get_processor();
+    let final_output = processor.process(&gcode_output);
+    let gcode = final_output.to_string();
+
     // Write output
     fs::write(output_path, gcode)?;
-    
-    println!("Generated: {}", output_path);
-    
+
+    println!("Generated: {} (using {} post-processor)", output_path, processor.name());
+
     Ok(())
 }
 
