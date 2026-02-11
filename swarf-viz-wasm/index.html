@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>swarf-viz 3D</title>
+    <style>
+        body {
+            margin: 0;
+            background: #111;
+            font-family: system-ui, -apple-system, sans-serif;
+            overflow: hidden;
+            color: #fff;
+        }
+        
+        #container {
+            display: flex;
+            height: 100vh;
+        }
+        
+        #sidebar {
+            width: 300px;
+            background: #1a1a1a;
+            border-right: 1px solid #333;
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        .subtitle {
+            color: #888;
+            font-size: 12px;
+            margin-bottom: 30px;
+        }
+        
+        #gcode-input {
+            flex: 1;
+            width: 100%;
+            background: #222;
+            border: 1px solid #333;
+            color: #ddd;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 11px;
+            padding: 10px;
+            box-sizing: border-box;
+            resize: none;
+            white-space: pre;
+            overflow-wrap: normal;
+            overflow-x: scroll;
+        }
+        
+        #gcode-input:focus {
+            outline: none;
+            border-color: #fa0;
+        }
+        
+        #controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        button {
+            flex: 1;
+            padding: 10px;
+            background: #333;
+            border: 1px solid #444;
+            color: #fff;
+            cursor: pointer;
+            font-size: 12px;
+            border-radius: 4px;
+        }
+        
+        button:hover {
+            background: #444;
+        }
+        
+        button.primary {
+            background: #fa0;
+            color: #000;
+            border-color: #fa0;
+        }
+        
+        button.primary:hover {
+            background: #ffb020;
+        }
+        
+        #info {
+            margin-top: 20px;
+            font-size: 11px;
+            color: #666;
+            line-height: 1.6;
+        }
+        
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            border-bottom: 1px solid #222;
+        }
+        
+        .stat span:last-child {
+            color: #fa0;
+        }
+        
+        #canvas-container {
+            flex: 1;
+            position: relative;
+        }
+        
+        #viz-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            cursor: grab;
+        }
+        
+        #viz-canvas:active {
+            cursor: grabbing;
+        }
+        
+        #legend {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 3px;
+            margin-right: 10px;
+        }
+        
+        .rapid { background: #666; }
+        .cut { background: #fa0; }
+        .arc { background: #0cf; }
+        
+        #drop-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: #fa0;
+            z-index: 1000;
+        }
+        
+        body.dragover #drop-overlay {
+            display: flex;
+        }
+    </style>
+</head>
+<body>
+    <div id="drop-overlay">Drop G-code file here</div>
+    
+    <div id="container">
+        <div id="sidebar">
+            <h1>swarf-viz</h1>
+            <div class="subtitle">WASM 3D G-code viewer</div>
+            
+            <textarea id="gcode-input" placeholder="Paste G-code here or drag & drop a .nc file..."></textarea>
+            
+            <div id="controls">
+                <button onclick="loadGcode()" class="primary">Update</button>
+                <button onclick="document.getElementById('file-input').click()">Load File</button>
+                <input type="file" id="file-input" style="display: none" accept=".nc,.tap,.gcode">
+            </div>
+            
+            <div id="info">
+                <div class="stat">
+                    <span>Moves:</span>
+                    <span id="stat-moves">-</span>
+                </div>
+                <div class="stat">
+                    <span>Bounds X:</span>
+                    <span id="stat-bounds-x">-</span>
+                </div>
+                <div class="stat">
+                    <span>Bounds Y:</span>
+                    <span id="stat-bounds-y">-</span>
+                </div>
+                <div class="stat">
+                    <span>Bounds Z:</span>
+                    <span id="stat-bounds-z">-</span>
+                </div>
+            </div>
+        </div>
+        
+        <div id="canvas-container">
+            <canvas id="viz-canvas"></canvas>
+            <div id="legend">
+                <div class="legend-item"><div class="legend-color rapid"></div> Rapid</div>
+                <div class="legend-item"><div class="legend-color cut"></div> Cut</div>
+                <div class="legend-item"><div class="legend-color arc"></div> Arc</div>
+            </div>
+        </div>
+    </div>
+    
+    <script type="module">
+        import init, { Viz3D } from './pkg/swarf_viz_wasm.js';
+        
+        let viz;
+        
+        async function main() {
+            await init();
+            
+            viz = new Viz3D('viz-canvas');
+            
+            // Load example
+            const example = `; PROGRAM START
+N0010 G90 G17 G40 G49 G80
+N0020 G21
+N0030 G54
+N0070 S2500 M03
+N0080 G00 Z5.000
+N0090 G00 X10.000 Y20.000
+N0100 G81 Z-5.000 R5.000 F100.0
+N0110 G80
+N0120 G00 Z5.000`;
+            
+            document.getElementById('gcode-input').value = example;
+            loadGcode();
+            
+            setupInteraction();
+            animate();
+        }
+        
+        function loadGcode() {
+            const gcode = document.getElementById('gcode-input').value;
+            viz.load_gcode(gcode);
+            updateStats();
+        }
+        
+        function updateStats() {
+            // These would come from WASM in a full implementation
+            document.getElementById('stat-moves').textContent = '12';
+            document.getElementById('stat-bounds-x').textContent = '0.0 - 100.0';
+            document.getElementById('stat-bounds-y').textContent = '0.0 - 100.0';
+            document.getElementById('stat-bounds-z').textContent = '-5.0 - 5.0';
+        }
+        
+        function setupInteraction() {
+            const canvas = document.getElementById('viz-canvas');
+            let dragging = false;
+            let lastX = 0, lastY = 0;
+            
+            canvas.addEventListener('mousedown', e => {
+                dragging = true;
+                lastX = e.clientX;
+                lastY = e.clientY;
+            });
+            
+            window.addEventListener('mousemove', e => {
+                if (!dragging) return;
+                const dx = e.clientX - lastX;
+                const dy = e.clientY - lastY;
+                
+                if (e.shiftKey) {
+                    viz.pan_camera(dx, -dy);
+                } else {
+                    viz.rotate_camera(dx, dy);
+                }
+                
+                lastX = e.clientX;
+                lastY = e.clientY;
+            });
+            
+            window.addEventListener('mouseup', () => dragging = false);
+            
+            canvas.addEventListener('wheel', e => {
+                e.preventDefault();
+                viz.zoom_camera(e.deltaY * 0.01);
+            }, { passive: false });
+            
+            // File loading
+            document.getElementById('file-input').addEventListener('change', e => {
+                const file = e.target.files[0];
+                if (file) loadFile(file);
+            });
+            
+            // Drag and drop
+            document.body.addEventListener('dragover', e => {
+                e.preventDefault();
+                document.body.classList.add('dragover');
+            });
+            
+            document.body.addEventListener('dragleave', () => {
+                document.body.classList.remove('dragover');
+            });
+            
+            document.body.addEventListener('drop', e => {
+                e.preventDefault();
+                document.body.classList.remove('dragover');
+                const file = e.dataTransfer.files[0];
+                if (file) loadFile(file);
+            });
+        }
+        
+        function loadFile(file) {
+            const reader = new FileReader();
+            reader.onload = e => {
+                document.getElementById('gcode-input').value = e.target.result;
+                loadGcode();
+            };
+            reader.readAsText(file);
+        }
+        
+        function animate() {
+            viz.render();
+            requestAnimationFrame(animate);
+        }
+        
+        // Resize canvas
+        function resize() {
+            const canvas = document.getElementById('viz-canvas');
+            const container = document.getElementById('canvas-container');
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+        }
+        
+        window.addEventListener('resize', resize);
+        resize();
+        
+        main();
+    </script>
+</body>
+</html>
