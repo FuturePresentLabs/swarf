@@ -14,8 +14,8 @@ setup {
 ; 1/16" endmill for profiling the thin fin
 tool 1 dia 0.0625 length 1.5 flutes 4 carbide
 
-; Profile the 1/16" fin from one side
-; Full width in one pass, axial engagement only
-profile outside rectangle at x 0.25 y 0.125 width 0.0625 height 0.25 depth 0.25
+; Cut the 1/16" fin
+; Direction Y+, sweep 3/8 (fin length), depth 3/16, height 0.3, no plunge
+cut Y+ 3/8 3/16 0.3 Z+ at zero
 
 spindle off
