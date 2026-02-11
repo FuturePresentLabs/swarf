@@ -1,0 +1,13 @@
+[package]
+name = "swarf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+logos = "0.14"          # Lexer generation
+ariadne = "0.4"         # Error reporting
+thiserror = "1.0"       # Error handling
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+pretty_assertions = "1.4"
