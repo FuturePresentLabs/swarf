@@ -205,7 +205,31 @@ pub fn load_material_database() -> std::collections::HashMap<String, MaterialDat
         coolant_required: true,
         high_feed_recommended: false,
     });
-    
+
+    // 8620 - Nickel-chromium-molybdenum case-hardening steel
+    // Common for firearm parts (selectors, bolt carriers, pins)
+    // Mil-spec for M16/AR-15 components
+    db.insert("Steel 8620".to_string(), MaterialData {
+        name: "Steel 8620".to_string(),
+        category: MaterialCategory::SteelLowAlloy,
+        grades: vec!["8620".to_string(), "8620H".to_string()],
+        description: "Case-hardening steel, tough core with hard surface. Mil-spec for firearm parts.".to_string(),
+        hardness_hrc: Some(25.0),  // Before case hardening
+        hardness_hb: Some(200),
+        machinability_rating: 65.0,
+        sfm_hss: (50.0, 90.0, 70.0),
+        sfm_cobalt: (70.0, 120.0, 95.0),
+        sfm_carbide: (130.0, 260.0, 195.0),
+        sfm_coated: (180.0, 350.0, 265.0),
+        sfm_ceramic: None,
+        chip_loads_carbide: vec![0.0005, 0.0005, 0.001, 0.001, 0.0015, 0.002, 0.003, 0.004],
+        chip_loads_hss: vec![0.0002, 0.0003, 0.0005, 0.001, 0.001, 0.0015, 0.002, 0.0025],
+        max_doc_diameter_ratio: 0.5,
+        recommended_engagement: 20.0,
+        coolant_required: true,
+        high_feed_recommended: false,
+    });
+
     db.insert("Steel A2".to_string(), MaterialData {
         name: "Steel A2".to_string(),
         category: MaterialCategory::SteelHighAlloy,

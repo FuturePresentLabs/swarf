@@ -151,7 +151,10 @@ impl Parser {
                         self.parse_face()?
                     }
                 }
-                Some(Token::Stock) => Operation::StockDef(self.parse_stock_def()?),
+                Some(Token::Stock) => {
+                    self.advance(); // consume 'stock' token
+                    Operation::StockDef(self.parse_stock_def()?)
+                }
 
                 Some(Token::Tap) => self.parse_tap()?,
                 Some(Token::Part) => Operation::PartDef(self.parse_part_def()?),
@@ -679,8 +682,9 @@ impl Parser {
             self.advance();
         }
         
-        // Optional stock definition
+        // Optional stock definition (inline)
         let stock = if self.peek() == Some(&Token::Stock) {
+            self.advance(); // consume 'stock' token
             Some(self.parse_stock_def()?)
         } else {
             None
