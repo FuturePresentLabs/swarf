@@ -144,7 +144,13 @@ impl Parser {
                     }
                 }
                 Some(Token::Profile) => self.parse_profile()?,
-                Some(Token::Face) => self.parse_face()?,
+                Some(Token::Face) => {
+                    if self.is_face_v2() {
+                        Operation::FaceV2(self.parse_face_v2()?)
+                    } else {
+                        self.parse_face()?
+                    }
+                }
                 Some(Token::Tap) => self.parse_tap()?,
                 Some(Token::Part) => Operation::PartDef(self.parse_part_def()?),
                 Some(Token::Setup) => Operation::Setup(self.parse_setup_block()?),
@@ -178,6 +184,18 @@ impl Parser {
                 return true;
             }
             if let Some((Token::Fraction(_), _)) = self.tokens.get(self.position + 1) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn is_face_v2(&self) -> bool {
+        // v2: face at stock depth 0.05
+        // or: face depth 0.05
+        if let Some((Token::Face, _)) = self.tokens.get(self.position) {
+            // If followed by 'at' or 'depth', it's v2
+            if let Some((Token::At | Token::Depth, _)) = self.tokens.get(self.position + 1) {
                 return true;
             }
         }
@@ -896,12 +914,51 @@ impl Parser {
         
         self.consume(Token::At)?;
         let position = self.parse_at_position()?;
-        
+
         Ok(PocketV2Op {
             shape,
             position,
             depth,
         })
+    }
+
+    fn parse_face_v2(&mut self) -> Result<FaceV2Op> {
+        self.consume(Token::Face)?;
+
+        // Parse position: "at stock" or "at X Y" or just implied stock
+        let position = if self.peek() == Some(&Token::At) {
+            self.advance();
+            if let Some(Token::Identifier(s)) = self.peek() {
+                if s == "stock" {
+                    self.advance();
+                    FacePosition::Stock
+                } else {
+                    let x = self.expect_number_or_fraction()?;
+                    let y = self.expect_number_or_fraction()?;
+                    FacePosition::At(x, y)
+                }
+            } else if let Some(Token::Stock) = self.peek() {
+                self.advance();
+                FacePosition::Stock
+            } else {
+                let x = self.expect_number_or_fraction()?;
+                let y = self.expect_number_or_fraction()?;
+                FacePosition::At(x, y)
+            }
+        } else {
+            // Default to stock
+            FacePosition::Stock
+        };
+
+        // Get depth - either explicit or default
+        let depth = if self.peek() == Some(&Token::Depth) {
+            self.advance();
+            self.expect_number_or_fraction()?
+        } else {
+            0.05 // Default 0.05" facing depth
+        };
+
+        Ok(FaceV2Op { position, depth })
     }
 
     fn parse_at_position(&mut self) -> Result<Position> {

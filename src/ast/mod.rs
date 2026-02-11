@@ -65,6 +65,7 @@ pub enum Operation {
     Clear(ClearOp),
     DrillV2(DrillV2Op),
     PocketV2(PocketV2Op),
+    FaceV2(FaceV2Op),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -342,4 +343,17 @@ pub struct PocketV2Op {
 pub enum PocketShape {
     Rect { width: f64, height: f64 },
     Circle { diameter: f64 },
+}
+
+/// Face operation - v2 simplified syntax
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceV2Op {
+    pub position: FacePosition,  // stock, at X Y, or just use work area
+    pub depth: f64,              // how much to face off
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FacePosition {
+    Stock,           // Face entire stock area
+    At(f64, f64),    // Face centered at X, Y
 }

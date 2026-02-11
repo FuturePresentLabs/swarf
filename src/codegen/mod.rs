@@ -83,8 +83,65 @@ impl CodeGenerator {
         }
     }
 
+    fn emit_cutting_parameters_summary(&mut self) {
+        if self.current_material.is_none() || self.current_tool_data.is_none() {
+            return;
+        }
+
+        let material = self.current_material.as_ref().unwrap();
+        let tool = self.current_tool_data.as_ref().unwrap();
+
+        self.output.emit_comment("================================================");
+        self.output.emit_comment("CUTTING PARAMETERS SUMMARY - SANITY CHECK THIS!");
+        self.output.emit_comment("================================================");
+        self.output.emit_comment(&format!("Material: {}", material));
+        self.output.emit_comment(&format!("Tool: {} dia, {} flutes, {:?}",
+            tool.diameter, tool.flutes, tool.material));
+
+        // Get cutting parameters from Black Book
+        let bb_tool = crate::black_book::ToolGeometry {
+            diameter: tool.diameter,
+            flute_count: tool.flutes,
+            tool_material: match tool.material {
+                crate::ast::ToolMaterial::HSS => crate::black_book::ToolMaterial::HSS,
+                crate::ast::ToolMaterial::Carbide => crate::black_book::ToolMaterial::Carbide,
+                crate::ast::ToolMaterial::Cobalt => crate::black_book::ToolMaterial::Cobalt,
+                crate::ast::ToolMaterial::Ceramic => crate::black_book::ToolMaterial::Ceramic,
+            },
+            corner_radius: None,
+            coating: None,
+        };
+
+        let engagement = crate::black_book::Engagement {
+            axial_doc: tool.diameter,
+            radial_woc: tool.diameter * 0.4,
+            radial_engagement_pct: 40.0,
+        };
+
+        if let Ok(params) = self.black_book.calculate(material, &bb_tool, &engagement) {
+            self.output.emit_comment(&format!("RPM: {:.0}", params.rpm));
+            self.output.emit_comment(&format!("Feed Rate: {:.1} IPM", params.feed_rate_ipm));
+            self.output.emit_comment(&format!("Max DOC (stepdown): {:.3}", tool.diameter * 0.8));
+            self.output.emit_comment(&format!("Max WOC (stepover): {:.3}", tool.diameter * 0.4));
+            self.output.emit_comment(&format!("Chip Load: {:.4} IPT", params.chip_load_ipt));
+
+            // Add any warnings
+            if !params.warnings.is_empty() {
+                self.output.emit_comment("WARNINGS:");
+                for warning in &params.warnings {
+                    self.output.emit_comment(&format!("  - {}", warning));
+                }
+            }
+        }
+
+        self.output.emit_comment("================================================");
+    }
+
     fn emit_header(&mut self, header: &Header) {
         self.output.emit_comment("PROGRAM START");
+
+        // Emit cutting parameters summary if we have material and tool info
+        self.emit_cutting_parameters_summary();
 
         // Safety block
         self.output.emit("G90 G17 G40 G49 G80"); // Absolute, XY plane, cancel comp, cancel length, cancel cycles
@@ -122,6 +179,7 @@ impl CodeGenerator {
             Operation::Pocket(p) => self.emit_pocket(p),
             Operation::Profile(p) => self.emit_profile(p),
             Operation::Face(f) => self.emit_face(f),
+            Operation::FaceV2(f) => self.emit_face_v2(f),
             Operation::Tap(t) => self.emit_tap(t),
             Operation::Comment(c) => self.output.emit_comment(c),
             Operation::PartDef(_) => {
@@ -677,6 +735,50 @@ impl CodeGenerator {
         self.output.emit("G00 Z50.0");
     }
 
+    fn emit_face_v2(&mut self, f: &FaceV2Op) {
+        self.output.emit_comment(&format!("FACE MILLING - depth: {:.3}", f.depth));
+
+        // Get tool and calculate parameters
+        let tool_dia = self.current_tool_data.as_ref()
+            .map(|t| t.diameter)
+            .unwrap_or(1.0); // Default 1" face mill
+
+        let (rpm, feed_rate, _stepdown, stepover) = self.calculate_pocket_params(tool_dia, f.depth);
+
+        // Default stock size (would come from part definition in future)
+        let stock_width = 3.0;
+        let stock_height = 2.0;
+
+        // Calculate facing passes
+        let num_passes = (stock_height / stepover).ceil() as i32;
+
+        self.output.emit_comment(&format!(
+            "Facing: {} passes, stepover: {:.3}",
+            num_passes, stepover
+        ));
+
+        self.output.emit(&format!("S{:.0} M03", rpm));
+
+        // Face milling path (zigzag)
+        let min_x = -0.1; // Start slightly outside stock
+        let max_x = stock_width + 0.1;
+        let min_y = -stepover; // Start with overlap
+
+        self.output.emit(&format!("G00 X{:.3} Y{:.3}", min_x, min_y));
+        self.output.emit(&format!("G01 Z-{:.3} F{:.1}", f.depth, feed_rate * 0.5));
+
+        for i in 0..num_passes {
+            let y = min_y + i as f64 * stepover;
+            let x_start = if i % 2 == 0 { min_x } else { max_x };
+            let x_end = if i % 2 == 0 { max_x } else { min_x };
+
+            self.output.emit(&format!("G00 Y{:.3}", y));
+            self.output.emit(&format!("G01 X{:.3} F{:.1}", x_end, feed_rate));
+        }
+
+        self.output.emit("G00 Z0.1");
+    }
+
     fn emit_tap(&mut self, t: &TapOp) {
         self.output.emit_comment("TAPPING CYCLE");
 
@@ -772,5 +874,90 @@ mod tests {
         assert!(output.contains("Black Book:"));
         assert!(output.contains("RPM="));
         assert!(output.contains("Feed="));
+    }
+
+    #[test]
+    fn test_face_v2_operation() {
+        let mut gen = CodeGenerator::new();
+
+        // Setup with material
+        let setup = SetupBlock {
+            zero: ZeroConfig {
+                x_ref: crate::ast::XRef::Left,
+                y_ref: crate::ast::YRef::Front,
+                z_ref: crate::ast::ZRef::Top,
+            },
+            material: Some("6061-T6".to_string()),
+            z_min: Some(0.0),
+            y_limit: None,
+        };
+        gen.emit_setup(&setup);
+
+        // Tool change with face mill
+        let tool_change = ToolChange {
+            tool_number: 1,
+            tool_data: Some(ToolData {
+                diameter: 1.0,
+                length: 2.0,
+                flutes: 4,
+                material: crate::ast::ToolMaterial::Carbide,
+            }),
+        };
+        gen.emit_tool_change(&tool_change);
+
+        // Face operation
+        let face = FaceV2Op {
+            position: FacePosition::Stock,
+            depth: 0.05,
+        };
+        gen.emit_face_v2(&face);
+
+        let output = gen.output.to_string();
+
+        // Should contain facing info
+        assert!(output.contains("FACE MILLING"));
+        assert!(output.contains("passes"));
+    }
+
+    #[test]
+    fn test_cutting_parameters_summary() {
+        let mut gen = CodeGenerator::new();
+
+        // Setup with material
+        let setup = SetupBlock {
+            zero: ZeroConfig {
+                x_ref: crate::ast::XRef::Left,
+                y_ref: crate::ast::YRef::Front,
+                z_ref: crate::ast::ZRef::Top,
+            },
+            material: Some("Aluminum 6061-T6".to_string()),
+            z_min: Some(0.0),
+            y_limit: None,
+        };
+        gen.setup = Some(setup.clone());
+        gen.current_material = setup.material;
+
+        // Tool change
+        let tool_change = ToolChange {
+            tool_number: 1,
+            tool_data: Some(ToolData {
+                diameter: 0.25,
+                length: 1.0,
+                flutes: 3,
+                material: crate::ast::ToolMaterial::Carbide,
+            }),
+        };
+        gen.emit_tool_change(&tool_change);
+
+        // Emit summary
+        gen.emit_cutting_parameters_summary();
+
+        let output = gen.output.to_string();
+
+        // Should contain sanity check header
+        assert!(output.contains("SANITY CHECK"));
+        assert!(output.contains("Material: Aluminum 6061-T6"));
+        assert!(output.contains("RPM:"));
+        assert!(output.contains("Feed Rate:"));
     }
 }
