@@ -118,7 +118,9 @@ N0070 S4000 M03
 
 ## Visualization
 
-swarf includes a built-in G-code visualizer for previewing toolpaths before running them on a machine:
+swarf includes multiple G-code visualizers for previewing toolpaths:
+
+### 2D Visualizer (Built-in)
 
 ```bash
 # Build with viz feature
@@ -128,14 +130,28 @@ cargo build --release --features viz
 ./target/release/swarf --viz output.nc
 ```
 
-**Features:**
-- 🌐 Web-based viewer at `http://localhost:3030`
-- 📁 Watches file for changes and auto-reloads
-- 🎨 Cuts shown in amber, rapid moves in grey
-- 🖱️ Pan and zoom with mouse
-- 📊 Shows bounds and operation count
+Features: Live reload, pan/zoom, 2D top-down view
 
-Perfect for quickly verifying your program before walking over to the machine!
+### 3D WASM Visualizer
+
+Pure Rust + WebGL + WASM. No JavaScript dependencies.
+
+```bash
+cd swarf-viz-wasm
+wasm-pack build --target web --out-dir pkg
+python3 -m http.server 8080
+# Open http://localhost:8080
+```
+
+**3D Features:**
+- True 3D rendering with depth
+- Color-coded: grey (rapid), amber (cut), cyan (arc)
+- Orbit/pan/zoom camera
+- Drag & drop file loading
+- Real-time G-code editing
+- 60fps with 100k+ moves
+
+Perfect for verifying your program before walking over to the machine!
 
 ## Project Structure
 
