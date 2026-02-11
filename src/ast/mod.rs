@@ -66,6 +66,7 @@ pub enum Operation {
     DrillV2(DrillV2Op),
     PocketV2(PocketV2Op),
     FaceV2(FaceV2Op),
+    StockDef(StockDef),
 }
 
 #[derive(Debug, Clone, PartialEq)]

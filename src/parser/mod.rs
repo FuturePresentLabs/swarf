@@ -151,6 +151,8 @@ impl Parser {
                         self.parse_face()?
                     }
                 }
+                Some(Token::Stock) => Operation::StockDef(self.parse_stock_def()?),
+
                 Some(Token::Tap) => self.parse_tap()?,
                 Some(Token::Part) => Operation::PartDef(self.parse_part_def()?),
                 Some(Token::Setup) => Operation::Setup(self.parse_setup_block()?),

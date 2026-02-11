@@ -41,6 +41,7 @@ pub struct CodeGenerator {
     current_material: Option<String>,
     black_book: BlackBook,
     setup: Option<SetupBlock>,
+    stock: Option<StockDef>,
 }
 
 impl CodeGenerator {
@@ -52,6 +53,7 @@ impl CodeGenerator {
             current_material: None,
             black_book: BlackBook::new(),
             setup: None,
+            stock: None,
         }
     }
 
@@ -180,6 +182,10 @@ impl CodeGenerator {
             Operation::Profile(p) => self.emit_profile(p),
             Operation::Face(f) => self.emit_face(f),
             Operation::FaceV2(f) => self.emit_face_v2(f),
+            Operation::StockDef(s) => {
+                self.stock = Some(s.clone());
+                self.output.emit_comment(&format!("STOCK: {} x {} x {} {}", s.size_x, s.size_y, s.size_z, s.material));
+            }
             Operation::Tap(t) => self.emit_tap(t),
             Operation::Comment(c) => self.output.emit_comment(c),
             Operation::PartDef(_) => {
@@ -745,9 +751,12 @@ impl CodeGenerator {
 
         let (rpm, feed_rate, _stepdown, stepover) = self.calculate_pocket_params(tool_dia, f.depth);
 
-        // Default stock size (would come from part definition in future)
-        let stock_width = 3.0;
-        let stock_height = 2.0;
+        // Get stock dimensions from stock definition or use defaults
+        let (stock_width, stock_height) = self.stock.as_ref()
+            .map(|s| (s.size_x, s.size_y))
+            .unwrap_or((3.0, 2.0)); // Default 3x2 if no stock specified
+
+        self.output.emit_comment(&format!("Stock size: {} x {}", stock_width, stock_height));
 
         // Calculate facing passes
         let num_passes = (stock_height / stepover).ceil() as i32;
