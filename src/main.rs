@@ -45,11 +45,17 @@ fn main() {
             #[cfg(feature = "viz")]
             {
                 if args.len() < 3 {
-                    eprintln!("Usage: swarf --viz <gcode-file.nc>");
+                    eprintln!("Usage: swarf --viz [--2d] <gcode-file.nc>");
+                    eprintln!("  --2d  Use 2D canvas view (default is 3D if available)");
                     std::process::exit(1);
                 }
+                
+                // Check for --2d flag
+                let use_2d = args.iter().any(|a| a == "--2d");
+                let file_arg = if args[2] == "--2d" { args[3].clone() } else { args[2].clone() };
+                
                 let rt = tokio::runtime::Runtime::new().unwrap();
-                rt.block_on(viz::runviz(args[2].clone()));
+                rt.block_on(viz::runviz(file_arg, use_2d));
             }
             #[cfg(not(feature = "viz"))]
             {

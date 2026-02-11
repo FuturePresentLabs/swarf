@@ -35,12 +35,16 @@ struct Bounds {
     min_z: f64, max_z: f64,
 }
 
-pub async fn runviz(gcode_file: String) {
+pub async fn runviz(gcode_file: String, use_2d: bool) {
     let file_path = Arc::new(gcode_file);
     let toolpath = Arc::new(RwLock::new(parse_gcode(&file_path)));
-    
+
     let (tx, _rx) = broadcast::channel(100);
     let tx = Arc::new(tx);
+
+    // Store view mode for HTML template
+    let view_mode = if use_2d { "2D" } else { "3D" };
+    let html = INDEX_HTML.replace("{{MODE}}", view_mode);
     
     // File watcher
     let watch_path = file_path.clone();
@@ -96,8 +100,8 @@ pub async fn runviz(gcode_file: String) {
         });
     
     // Static files
-    let index = warp::path::end().map(|| {
-        warp::reply::html(INDEX_HTML)
+    let index = warp::path::end().map(move || {
+        warp::reply::html(html.clone())
     });
     
     let routes = ws_route.or(index);
@@ -254,7 +258,7 @@ fn parse_coord(line: &str, coord: char) -> Option<f64> {
 static INDEX_HTML: &str = r#"<!DOCTYPE html>
 <html>
 <head>
-    <title>swarf viz</title>
+    <title>swarf viz | {{MODE}}</title>
     <style>
         body { margin: 0; overflow: hidden; background: #1a1a1a; font-family: system-ui, sans-serif; }
         #canvas { width: 100vw; height: 100vh; }
@@ -271,10 +275,19 @@ static INDEX_HTML: &str = r#"<!DOCTYPE html>
             font-size: 12px;
         }
         .disconnected { color: #f44 !important; }
+        #mode-badge {
+            position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+            background: rgba(255,170,0,0.3);
+            color: #ffaa00;
+            padding: 5px 15px; border-radius: 20px;
+            font-size: 12px; font-weight: bold;
+            border: 1px solid #ffaa00;
+        }
     </style>
 </head>
 <body>
     <canvas id="canvas"></canvas>
+    <div id="mode-badge">{{MODE}} VIEW</div>
     <div id="info">
         <strong>swarf viz</strong><br>
         <span id="bounds">Loading...</span><br>
