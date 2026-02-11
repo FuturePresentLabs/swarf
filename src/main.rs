@@ -117,6 +117,7 @@ fn main() {
             let mut post_type = post::PostProcessorType::Generic;
             let mut input_path = None;
             let mut output_path = "output.nc";
+            let mut max_rpm: Option<f64> = None;
 
             let mut i = 1;
             while i < args.len() {
@@ -132,6 +133,19 @@ fn main() {
                             i += 2;
                         } else {
                             eprintln!("Error: --post requires an argument (mach3, linuxcnc, haas)");
+                            std::process::exit(1);
+                        }
+                    }
+                    "--max-rpm" => {
+                        if i + 1 < args.len() {
+                            max_rpm = args[i + 1].parse().ok();
+                            if max_rpm.is_none() {
+                                eprintln!("Error: --max-rpm requires a valid number");
+                                std::process::exit(1);
+                            }
+                            i += 2;
+                        } else {
+                            eprintln!("Error: --max-rpm requires an argument (e.g., 10000)");
                             std::process::exit(1);
                         }
                     }
@@ -159,7 +173,7 @@ fn main() {
                 std::process::exit(1);
             });
 
-            if let Err(e) = compile_with_post(input_path, output_path, post_type) {
+            if let Err(e) = compile_with_post(input_path, output_path, post_type, max_rpm) {
                 eprintln!("Error: {:?}", e);
                 std::process::exit(1);
             }
@@ -173,6 +187,7 @@ fn print_usage() {
     println!("Usage:");
     println!("  swarf <input.dsl> [output.nc]          Compile DSL to G-code");
     println!("  swarf <input.dsl> --post <type>        Use post-processor");
+    println!("  swarf <input.dsl> --max-rpm <rpm>      Limit spindle RPM (scales feed)");
     println!("  swarf --viz <file.nc>                  Start visualizer on http://localhost:3030");
     println!("  swarf --list-posts                     List available post-processors");
     println!("  swarf --help                           Show this help");
@@ -186,15 +201,16 @@ fn print_usage() {
     println!("Examples:");
     println!("  swarf program.dsl output.nc");
     println!("  swarf program.dsl --post mach3 -o output.nc");
+    println!("  swarf program.dsl --max-rpm 10000 -o output.nc");
     println!("  swarf examples/bracket.dsl");
     println!("  swarf --viz output.nc");
 }
 
 fn compile(input_path: &str, output_path: &str) -> Result<(), Error> {
-    compile_with_post(input_path, output_path, post::PostProcessorType::Generic)
+    compile_with_post(input_path, output_path, post::PostProcessorType::Generic, None)
 }
 
-fn compile_with_post(input_path: &str, output_path: &str, post_type: post::PostProcessorType) -> Result<(), Error> {
+fn compile_with_post(input_path: &str, output_path: &str, post_type: post::PostProcessorType, max_rpm: Option<f64>) -> Result<(), Error> {
     // Read input
     let source = fs::read_to_string(input_path)?;
 
@@ -216,7 +232,11 @@ fn compile_with_post(input_path: &str, output_path: &str, post_type: post::PostP
     }
 
     // Generate G-code
-    let mut codegen = codegen::CodeGenerator::new();
+    let mut codegen = if let Some(rpm) = max_rpm {
+        codegen::CodeGenerator::new().with_max_rpm(rpm)
+    } else {
+        codegen::CodeGenerator::new()
+    };
     let gcode_output = codegen.generate_output(&program);
 
     // Apply post-processor

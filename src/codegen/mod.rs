@@ -44,6 +44,7 @@ pub struct CodeGenerator {
     black_book: BlackBook,
     setup: Option<SetupBlock>,
     stock: Option<StockDef>,
+    max_rpm: Option<f64>,
 }
 
 impl CodeGenerator {
@@ -56,7 +57,13 @@ impl CodeGenerator {
             black_book: BlackBook::new(),
             setup: None,
             stock: None,
+            max_rpm: None,
         }
+    }
+
+    pub fn with_max_rpm(mut self, max_rpm: f64) -> Self {
+        self.max_rpm = Some(max_rpm);
+        self
     }
 
     pub fn generate(&mut self, program: &Program) -> String {
@@ -218,6 +225,17 @@ impl CodeGenerator {
         }
     }
 
+    /// Apply max RPM limit, scaling feed proportionally to maintain chip load
+    fn apply_rpm_limit(&self, rpm: f64, feed: f64) -> (f64, f64) {
+        if let Some(max_rpm) = self.max_rpm {
+            if rpm > max_rpm {
+                let scale = max_rpm / rpm;
+                return (max_rpm, feed * scale);
+            }
+        }
+        (rpm, feed)
+    }
+
     fn calculate_drill_params(&self, diameter: f64, depth: f64) -> (f64, f64, f64) {
         // Returns (rpm, feed_rate, peck_depth)
         if let Some(ref material) = self.current_material {
@@ -250,13 +268,15 @@ impl CodeGenerator {
                         depth // No peck for shallow holes
                     };
 
-                    return (params.rpm as f64, params.feed_rate_ipm * 0.7, peck_depth);
+                    let (rpm, feed) = self.apply_rpm_limit(params.rpm as f64, params.feed_rate_ipm * 0.7);
+                    return (rpm, feed, peck_depth);
                 }
             }
         }
 
         // Default values if Black Book lookup fails
-        (3000.0, 15.0, depth)
+        let (rpm, feed) = self.apply_rpm_limit(3000.0, 15.0);
+        (rpm, feed, depth)
     }
 
     fn calculate_pocket_params(&self, tool_dia: f64, _depth: f64) -> (f64, f64, f64, f64) {
@@ -289,13 +309,15 @@ impl CodeGenerator {
                 };
 
                 if let Ok(params) = self.black_book.calculate(material, &tool, &engagement) {
-                    return (params.rpm as f64, params.feed_rate_ipm, stepdown, stepover);
+                    let (rpm, feed) = self.apply_rpm_limit(params.rpm as f64, params.feed_rate_ipm);
+                    return (rpm, feed, stepdown, stepover);
                 }
             }
         }
 
         // Default values
-        (8000.0, 40.0, tool_dia * 0.5, tool_dia * 0.4)
+        let (rpm, feed) = self.apply_rpm_limit(8000.0, 40.0);
+        (rpm, feed, tool_dia * 0.5, tool_dia * 0.4)
     }
 
     fn emit_cut(&mut self, cut: &CutOp) {
