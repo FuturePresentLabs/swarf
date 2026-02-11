@@ -42,9 +42,21 @@ pub async fn runviz(gcode_file: String, use_2d: bool) {
     let (tx, _rx) = broadcast::channel(100);
     let tx = Arc::new(tx);
 
-    // Store view mode for HTML template
+    // Determine view mode
     let view_mode = if use_2d { "2D" } else { "3D" };
-    let html = INDEX_HTML.replace("{{MODE}}", view_mode);
+    
+    // Use 3D viz if available and not forced to 2D
+    #[cfg(feature = "viz-3d")]
+    let use_3d = !use_2d;
+    
+    #[cfg(not(feature = "viz-3d"))]
+    let use_3d = false;
+    
+    let html = if use_3d {
+        INDEX_HTML_3D.to_string()
+    } else {
+        INDEX_HTML.replace("{{MODE}}", view_mode)
+    };
     
     // File watcher
     let watch_path = file_path.clone();
@@ -405,9 +417,45 @@ static INDEX_HTML: &str = r#"<!DOCTYPE html>
             document.getElementById('status').className = 'disconnected';
             document.getElementById('status').textContent = '● Disconnected';
         };
-        
+
         window.addEventListener('resize', resize);
         resize();
     </script>
+</body>
+</html>"#;
+
+#[cfg(feature = "viz-3d")]
+static INDEX_HTML_3D: &str = r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>swarf-viz 3D</title>
+    <style>
+        body { margin: 0; background: #111; font-family: system-ui, sans-serif; overflow: hidden; color: #fff; }
+        #container { display: flex; height: 100vh; }
+        #sidebar { width: 300px; background: #1a1a1a; border-right: 1px solid #333; padding: 20px; box-sizing: border-box; }
+        h1 { margin: 0; font-size: 24px; }
+        .subtitle { color: #888; font-size: 12px; margin-bottom: 20px; }
+        #info { margin-top: 20px; font-size: 12px; }
+        #canvas-container { flex: 1; position: relative; }
+        #viz-canvas { width: 100%; height: 100%; display: block; }
+        #mode-badge { position: fixed; top: 10px; right: 10px; background: #fa0; color: #000; padding: 5px 15px; border-radius: 20px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="mode-badge">3D VIEW</div>
+    <div id="container">
+        <div id="sidebar">
+            <h1>swarf-viz</h1>
+            <div class="subtitle">3D WASM G-code viewer</div>
+            <div id="info">
+                <p>3D visualization requires the full WASM build.</p>
+                <p>Build with: <code>cargo build --features viz-3d</code></p>
+            </div>
+        </div>
+        <div id="canvas-container">
+            <canvas id="viz-canvas"></canvas>
+        </div>
+    </div>
 </body>
 </html>"#;

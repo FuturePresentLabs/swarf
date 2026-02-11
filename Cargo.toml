@@ -5,10 +5,12 @@ edition = "2021"
 license = "AGPL-3.0"
 repository = "https://github.com/FuturePresentLabs/swarf"
 authors = ["Future Present Labs LLC <contact@futurepresentlabs.com>"]
+build = "build.rs"
 
 [features]
 default = []
 viz = ["dep:warp", "dep:tokio", "dep:notify", "dep:serde_json", "dep:futures"]
+viz-3d = ["viz"]
 
 [dependencies]
 logos = "0.14"          # Lexer generation
