@@ -194,17 +194,16 @@ fn get_unit_horsepower(material: &MaterialData) -> f64 {
 /// Calculate chip thinning factor for HEM (High Efficiency Milling)
 pub fn calculate_chip_thinning(
     radial_engagement_pct: f64,
-    axial_engagement_pct: f64,
+    _axial_engagement_pct: f64,
 ) -> f64 {
     let ae_d = radial_engagement_pct / 100.0; // Convert to decimal
-    let ap_d = axial_engagement_pct / 100.0;
-    
+
     // Chip thinning factor: Fz_ effective = Fz × (1 / sqrt(ae))
     // But we cap it at reasonable limits
     let thinning_factor = 1.0 / ae_d.sqrt();
-    
+
     // Cap at 3.5x for safety
-    thinning_factor.min(3.5).max(1.0)
+    thinning_factor.clamp(1.0, 3.5)
 }
 
 /// Calculate recommended surface speed adjustment for tool wear
@@ -271,7 +270,7 @@ pub fn calculate_operation_params(
         }
         OperationType::Adaptive => {
             // High speed machining style
-            let (sfm_min, sfm_max, _) = lookup_sfm(material, tool.tool_material);
+            let (_sfm_min, sfm_max, _) = lookup_sfm(material, tool.tool_material);
             let sfm = sfm_max * 0.85;
             
             let rpm = ((3.82 * sfm) / tool.diameter) as u32;

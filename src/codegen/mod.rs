@@ -28,9 +28,11 @@ impl GCodeOutput {
     pub fn emit_comment(&mut self, comment: &str) {
         self.lines.push(format!("; {}", comment));
     }
+}
 
-    pub fn to_string(&self) -> String {
-        self.lines.join("\n")
+impl std::fmt::Display for GCodeOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.lines.join("\n"))
     }
 }
 
@@ -257,7 +259,7 @@ impl CodeGenerator {
         (3000.0, 15.0, depth)
     }
 
-    fn calculate_pocket_params(&self, tool_dia: f64, depth: f64) -> (f64, f64, f64, f64) {
+    fn calculate_pocket_params(&self, tool_dia: f64, _depth: f64) -> (f64, f64, f64, f64) {
         // Returns (rpm, feed_rate, stepdown, stepover)
         if let Some(ref material) = self.current_material {
             if let Some(ref tool_data) = self.current_tool_data {
@@ -275,9 +277,9 @@ impl CodeGenerator {
                 };
 
                 // Use default DOC ratio - could query Black Book if we add a method
-                let max_doc_ratio = 1.0; // Default to 1x diameter
+                let max_doc_ratio: f64 = 1.0; // Default to 1x diameter
 
-                let stepdown = tool_dia * (max_doc_ratio as f64).min(1.0);
+                let stepdown = tool_dia * max_doc_ratio.min(1.0);
                 let stepover = tool_dia * 0.4; // 40% stepover default
 
                 let engagement = Engagement {
@@ -778,7 +780,7 @@ impl CodeGenerator {
 
         for i in 0..num_passes {
             let y = min_y + i as f64 * stepover;
-            let x_start = if i % 2 == 0 { min_x } else { max_x };
+            let _x_start = if i % 2 == 0 { min_x } else { max_x };
             let x_end = if i % 2 == 0 { max_x } else { min_x };
 
             self.output.emit(&format!("G00 Y{:.3}", y));

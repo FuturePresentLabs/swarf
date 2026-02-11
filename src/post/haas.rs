@@ -10,20 +10,19 @@ pub struct HaasPost;
 
 impl PostProcessor for HaasPost {
     fn process(&self, input: &GCodeOutput) -> GCodeOutput {
-        let mut output_lines = Vec::new();
-        
-        // Add Haas header with safety lines
-        output_lines.push("%".to_string());
-        output_lines.push("(HAAS CNC PROGRAM)".to_string());
-        output_lines.push("G20 ; Inches mode".to_string());
-        output_lines.push("G17 ; XY plane".to_string());
-        output_lines.push("G40 ; Cancel cutter comp".to_string());
-        output_lines.push("G49 ; Cancel tool length comp".to_string());
-        output_lines.push("G80 ; Cancel canned cycles".to_string());
-        output_lines.push("G90 ; Absolute positioning".to_string());
-        output_lines.push("G94 ; Feed per minute".to_string());
-        output_lines.push("G98 ; Return to initial plane (Haas default)".to_string());
-        output_lines.push("".to_string());
+        let mut output_lines = vec![
+            "%".to_string(),
+            "(HAAS CNC PROGRAM)".to_string(),
+            "G20 ; Inches mode".to_string(),
+            "G17 ; XY plane".to_string(),
+            "G40 ; Cancel cutter comp".to_string(),
+            "G49 ; Cancel tool length comp".to_string(),
+            "G80 ; Cancel canned cycles".to_string(),
+            "G90 ; Absolute positioning".to_string(),
+            "G94 ; Feed per minute".to_string(),
+            "G98 ; Return to initial plane (Haas default)".to_string(),
+            "".to_string(),
+        ];
         
         // Copy input lines with potential Haas optimizations
         for line in &input.lines {

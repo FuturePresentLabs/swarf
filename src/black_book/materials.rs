@@ -1,6 +1,5 @@
 //! Material database - derived from Harvey Tool and Machinery's Handbook
 
-use super::{ToolMaterial, BlackBookError};
 use serde::{Deserialize, Serialize};
 
 /// Material category for grouping

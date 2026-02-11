@@ -1,3 +1,5 @@
+#![allow(clippy::upper_case_acronyms)]
+
 use logos::Logos;
 
 /// Tokens for the G-code DSL

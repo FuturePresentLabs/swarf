@@ -10,24 +10,20 @@ pub struct Mach3Post;
 impl PostProcessor for Mach3Post {
     fn process(&self, input: &GCodeOutput) -> GCodeOutput {
         let mut output_lines = Vec::new();
-        let mut in_g83 = false;
-        let mut g83_params: Option<(f64, f64, f64, f64, f64)> = None; // x, y, r, z, q, f
-        let mut in_g81 = false;
-        let mut g81_params: Option<(f64, f64, f64, f64)> = None; // x, y, r, z, f
         let mut last_x = 0.0;
         let mut last_y = 0.0;
         let mut last_f = 0.0;
-        
+
         for line in &input.lines {
             let trimmed = line.trim();
-            
+
             // Skip line numbers for processing
             let code = if trimmed.starts_with("N") {
                 trimmed.split_once(' ').map(|(_, rest)| rest).unwrap_or(trimmed)
             } else {
                 trimmed
             };
-            
+
             // Check for position commands
             if code.contains("G00") || code.contains("G01") {
                 // Extract X and Y coordinates
@@ -46,46 +42,34 @@ impl PostProcessor for Mach3Post {
                     }
                 }
             }
-            
+
             // Detect G83 cycles
             if code.contains("G83") {
-                in_g83 = true;
                 // Parse G83 parameters from the line
                 let r = extract_param(code, 'R').unwrap_or(0.1);
                 let z = extract_param(code, 'Z').unwrap_or(-0.5);
                 let q = extract_param(code, 'Q').unwrap_or(0.25);
-                let f = extract_param(code, 'F').unwrap_or(last_f);
-                g83_params = Some((last_x, last_y, r, z.abs(), q));
-                
+                let _f = extract_param(code, 'F').unwrap_or(last_f);
+
                 // Convert to long-form and add
-                if let Some((x, y, r_plane, z_depth, q_peck)) = g83_params {
-                    let long_form = g83_to_long_form(x, y, r_plane, z_depth, q_peck, last_f);
-                    for lf_line in long_form {
-                        output_lines.push(lf_line);
-                    }
+                let long_form = g83_to_long_form(last_x, last_y, r, z.abs(), q, last_f);
+                for lf_line in long_form {
+                    output_lines.push(lf_line);
                 }
-                in_g83 = false;
-                g83_params = None;
                 continue;
             }
-            
+
             // Detect G81 cycles
             if code.contains("G81") {
-                in_g81 = true;
                 let r = extract_param(code, 'R').unwrap_or(0.1);
                 let z = extract_param(code, 'Z').unwrap_or(-0.5);
                 let f = extract_param(code, 'F').unwrap_or(last_f);
-                g81_params = Some((last_x, last_y, r, z.abs()));
 
                 // Convert to long-form and add
-                if let Some((x, y, r_plane, z_depth)) = g81_params {
-                    let long_form = g81_to_long_form(x, y, r_plane, z_depth, f);
-                    for lf_line in long_form {
-                        output_lines.push(lf_line);
-                    }
+                let long_form = g81_to_long_form(last_x, last_y, r, z.abs(), f);
+                for lf_line in long_form {
+                    output_lines.push(lf_line);
                 }
-                in_g81 = false;
-                g81_params = None;
                 continue;
             }
 

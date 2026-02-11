@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(clippy::upper_case_acronyms)]
+
 mod ast;
 mod lexer;
 mod parser;

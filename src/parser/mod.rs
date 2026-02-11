@@ -699,29 +699,26 @@ impl Parser {
     
     fn parse_stock_def(&mut self) -> Result<StockDef> {
         // Parse as: 3x2x0.5 6061-T6 or material first
-        let mut size_x = 0.0;
-        let mut size_y = 0.0;
-        let mut size_z = 0.0;
-        let mut material = String::new();
-        
+        let (size_x, size_y, size_z, material);
+
         // Try to parse dimensions or material
         if let Some(Token::Number(Some(n))) = self.peek() {
             size_x = *n;
             self.advance();
-            
+
             // Check for x separator
             if self.peek() == Some(&Token::X) {
                 self.advance();
             }
-            
+
             size_y = self.expect_number()?;
-            
+
             if self.peek() == Some(&Token::X) {
                 self.advance();
             }
-            
+
             size_z = self.expect_number()?;
-            
+
             // Now get material
             material = self.expect_string()?;
         } else {
@@ -733,7 +730,7 @@ impl Parser {
             self.consume(Token::X)?;
             size_z = self.expect_number()?;
         }
-        
+
         Ok(StockDef {
             material,
             size_x,
@@ -1034,7 +1031,7 @@ impl Parser {
     }
     
     fn get_current_token_text(&self) -> String {
-        if let Some((_, span)) = self.tokens.get(self.position) {
+        if self.tokens.get(self.position).is_some() {
             // This would need the original input to work properly
             // For now, return a placeholder
             String::new()
