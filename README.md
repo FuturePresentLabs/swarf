@@ -25,6 +25,11 @@ cargo build --release
 
 # Compile a program
 ./target/release/swarf examples/bracket.dsl output.nc
+
+# Visualize (with viz feature)
+cargo build --release --features viz
+./target/release/swarf --viz output.nc
+# Opens http://localhost:3030 with live-reloading toolpath preview
 ```
 
 ## Architecture
@@ -109,6 +114,28 @@ N0070 S4000 M03
 - ✅ **Multiple operations** — Drill, pocket, profile, face, tap
 - ✅ **Imperial & metric** — Work in your preferred units
 - ✅ **Fanuc-compatible** — Works with most CNC controllers
+- ✅ **Live visualization** — Preview toolpaths in browser with auto-reload
+
+## Visualization
+
+swarf includes a built-in G-code visualizer for previewing toolpaths before running them on a machine:
+
+```bash
+# Build with viz feature
+cargo build --release --features viz
+
+# Start visualizer
+./target/release/swarf --viz output.nc
+```
+
+**Features:**
+- 🌐 Web-based viewer at `http://localhost:3030`
+- 📁 Watches file for changes and auto-reloads
+- 🎨 Cuts shown in amber, rapid moves in grey
+- 🖱️ Pan and zoom with mouse
+- 📊 Shows bounds and operation count
+
+Perfect for quickly verifying your program before walking over to the machine!
 
 ## Project Structure
 
