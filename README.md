@@ -4,15 +4,26 @@
 
 [![Logo](logo/swarf-logo.png)](https://github.com/FuturePresentLabs/swarf)
 
+**Write English. Make Chips.**
+
 Natural language → DSL → Validated G-code for CNC machining.
 
 ## Why?
 
 Writing G-code by hand is tedious and error-prone. CAM software is powerful but slow for simple operations. **swarf** hits the sweet spot: fast to write, easy to read, and generates verifiable output.
 
-```bash
-# Natural language to G-code in seconds
-swarf --prompt "drill 4 holes at corners of 100x200 plate, depth 10mm"
+```dsl
+; Face the stock
+stock 4x3x0.75 Aluminum 6061-T6
+tool 1 dia 1.0 flutes 4 carbide
+face at stock depth 0.05
+
+; Drill some holes
+drill 0.25 at 1.0 0.5 thru
+drill 0.25 at 3.0 0.5 thru
+
+; Pocket the center
+pocket 2.0 1.5 0.25 at 2.0 1.0
 ```
 
 ## Quick Start
@@ -26,18 +37,24 @@ cargo build --release
 # Compile a program
 ./target/release/swarf examples/bracket.dsl output.nc
 
+# With specific post-processor
+./target/release/swarf program.dsl --post mach3 -o output.nc
+
 # Visualize (with viz feature)
 cargo build --release --features viz
 ./target/release/swarf --viz output.nc
 # Opens http://localhost:3030 with live-reloading toolpath preview
+
+# List available post-processors
+./target/release/swarf --list-posts
 ```
 
 ## Architecture
 
 swarf is a two-stage compiler:
 
-1. **LLM → DSL** — Natural language to structured machining description
-2. **DSL → G-code** — Validated, machine-ready output
+1. **LLM → DSL** — Natural language to structured machining description (planned)
+2. **DSL → G-code** — Validated, machine-ready output with Black Book feeds/speeds
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
@@ -45,102 +62,164 @@ swarf is a two-stage compiler:
 │  Language   │     │  (swarf)    │     │  (.nc/.tap) │
 └─────────────┘     └─────────────┘     └─────────────┘
       ↑                    ↑                   ↑
-   (OpenAI/            (Rust             (Fanuc/
-   Claude/etc)         compiler)          Haas/etc)
+   (Planned)            (Rust            (Fanuc/Haas/
+                        compiler)         LinuxCNC/Mach3)
 ```
 
-## DSL Syntax
+## DSL Syntax (v2)
+
+The new minimal syntax focuses on **what** you want to make, not **how** to machine it.
+
+### Setup
 
 ```dsl
-units metric|imperial
-offset 54|55|56|57|58|59
-coolant flood|mist|off
-
-; Tool definition
-tool <n> dia <D> length <L> [flutes <n>] [hss|carbide]
-spindle cw|ccw rpm <speed>
-
-; Operations
-drill at x <X> y <Y> depth <Z> [peck <p>] [feed <f>]
-pocket rectangle|circle at x <X> y <Y> ... depth <Z>
-profile inside|outside|on ... depth <Z>
-face rectangle ... depth <Z>
-tap at x <X> y <Y> depth <Z> pitch <p>
+stock 3x2x0.5 6061-T6           ; Stock dimensions and material
+setup {
+    zero right back bottom      ; Work coordinate origin
+    material Aluminum 6061-T6   ; For Black Book feeds
+    z-min 0                     ; Hard floor - never go below
+    y-limit -0.25               ; Travel constraint
+}
 ```
 
-## Example
+### Operations
+
+```dsl
+; Face mill the top
+tool 1 dia 1.0 flutes 4 carbide
+face at stock depth 0.05        ; Remove 0.05" from top
+
+; Drill holes (Black Book calculates RPM, feed, peck)
+drill 0.25 at 1.0 0.5 thru     ; Through hole
+drill 0.125 at zero depth 0.5   ; Blind hole at origin
+
+; Pocket (auto-calculated stepdown/stepover)
+pocket 2.0 1.5 0.25 at 0.5 0.5  ; width height depth at x y
+pocket circle 1.0 0.25 at 1.0 1.0  ; Circular pocket
+
+; Directional cuts (for slots, trenches)
+cut Y+ 5/8 1/8 0.3 Z+ at zero   ; direction sweep depth height Z-constraint
+```
+
+### Key Concepts
+
+- **`at X Y`** — Explicit position
+- **`at zero`** — Work origin (0, 0)
+- **`at stock`** — Stock boundary/center
+- **Fractions** — `5/8`, `1/4`, `3/16` (machinist-friendly)
+- **`Z+`/`Z-`** — Z movement constraints (no plunge, plunge only)
+
+## Example: Complete Program
 
 **Input (DSL):**
 ```dsl
-units metric
-offset 54
+stock 4x3x0.75 Aluminum 6061-T6
 
-tool 1 dia 6 length 50 flutes 2 carbide
-spindle cw rpm 4000
+setup {
+    zero left front top
+    material Aluminum 6061-T6
+}
 
-; Drill 4 mounting holes
-drill at x 10 y 10 depth 18 peck 6 feed 150
-drill at x 90 y 10 depth 18 peck 6 feed 150
-drill at x 90 y 90 depth 18 peck 6 feed 150
-drill at x 10 y 90 depth 18 peck 6 feed 150
+tool 1 dia 1.0 flutes 4 carbide
+
+; Face the top
+face at stock depth 0.05
+
+; Drill mounting holes
+drill 0.25 at 0.5 0.5 thru
+drill 0.25 at 3.5 0.5 thru
+drill 0.25 at 3.5 2.5 thru
+drill 0.25 at 0.5 2.5 thru
 
 ; Pocket in center
-pocket rectangle at x 30 y 30 width 40 height 40 depth 10 stepdown 4 feed 800
+pocket 2.0 1.5 0.25 at 2.0 1.5
 
-spindle off
+; Clean up the edges
+tool 2 dia 0.5 flutes 4 carbide
+profile outside at stock offset 0.1
 ```
 
 **Output (G-code):**
 ```gcode
+; ================================================
+; CUTTING PARAMETERS SUMMARY - SANITY CHECK THIS!
+; ================================================
+; Material: Aluminum 6061-T6
+; Tool: 1.00 dia, 4 flutes, Carbide
+; RPM: 4582
+; Feed Rate: 91.2 IPM
+; Max DOC (stepdown): 0.800
+; Max WOC (stepover): 0.400
+; Chip Load: 0.0050 IPT
+; ================================================
 ; PROGRAM START
-N0010 G90 G17 G40 G49 G80
-N0020 G21
-N0030 G54
-; TOOL CHANGE - T1
-N0040 M05
-N0050 M09
-N0060 T1 M06
-N0070 S4000 M03
-; DRILL CYCLE
 ...
 ```
 
 ## Features
 
-- ✅ **Natural language input** — Describe operations conversationally
-- ✅ **Safety validation** — Catch errors before machine time
-- ✅ **Thin feature support** — Fins, walls, small WOC control
-- ✅ **Collision avoidance** — Respect fixtures and nearby features
-- ✅ **Multiple operations** — Drill, pocket, profile, face, tap
+- ✅ **The Black Book** — Built-in feeds/speeds database (20+ materials)
+- ✅ **Auto-calculated parameters** — RPM, feed, DOC, WOC from material + tool
+- ✅ **Cutting summary header** — Sanity check values before running
+- ✅ **Safety validation** — Work hardening detection, tool deflection warnings
+- ✅ **Post-processors** — Mach3, LinuxCNC, Haas, Generic Fanuc
+- ✅ **Minimal DSL** — Write English. Make Chips.
+- ✅ **Fractions** — 5/8 not 0.625
 - ✅ **Imperial & metric** — Work in your preferred units
-- ✅ **Fanuc-compatible** — Works with most CNC controllers
 - ✅ **Live visualization** — Preview toolpaths in browser with auto-reload
 
-## Visualization
+## The Black Book
 
-swarf includes multiple G-code visualizers for previewing toolpaths:
+swarf includes a comprehensive machining data reference:
+
+- **20+ materials**: Aluminum (6061, 7075, 2024), Steel (1018, 4140, A2), Stainless (304, 316, 17-4PH), Titanium, Inconel, Cast Iron, Brass, Copper
+- **SFM ranges** by tool material (HSS, Carbide, Coated, Ceramic)
+- **Chip loads** indexed by tool diameter
+- **Chip thinning compensation** for low radial engagement
+- **Safety warnings** for work hardening, heat buildup, tool deflection
+
+Data sourced from Harvey Tool, Machinery's Handbook, and Kennametal.
+
+## Post-Processors
+
+swarf generates controller-specific G-code:
+
+```bash
+./target/release/swarf program.dsl --post mach3 -o output.nc
+```
+
+| Post-Processor | Description |
+|----------------|-------------|
+| `generic` | Fanuc-compatible (default) |
+| `mach3` | Mach3/Mach4 (expands canned cycles to long-form) |
+| `linuxcnc` | LinuxCNC |
+| `haas` | Haas with controller-specific headers |
+
+**Mach3 expansion example:**
+```
+G83 R0.1 Z-0.55 Q0.25 → G00 + G01 peck moves + retracts
+```
+
+## Visualization
 
 ### 2D Visualizer (Built-in)
 
 ```bash
-# Build with viz feature
 cargo build --release --features viz
-
-# Start visualizer
-./target/release/swarf --viz output.nc
+./target/release/swarf --viz output.nc      # Default view
+./target/release/swarf --viz --2d output.nc # Force 2D
 ```
 
 Features: Live reload, pan/zoom, 2D top-down view
 
 ### 3D WASM Visualizer
 
-Pure Rust + WebGL + WASM. No JavaScript dependencies.
+Pure Rust + WebGL + WASM in `swarf-viz-wasm/`:
 
 ```bash
 cd swarf-viz-wasm
 wasm-pack build --target web --out-dir pkg
 python3 -m http.server 8080
-# Open http://localhost:8080
 ```
 
 **3D Features:**
@@ -148,10 +227,6 @@ python3 -m http.server 8080
 - Color-coded: grey (rapid), amber (cut), cyan (arc)
 - Orbit/pan/zoom camera
 - Drag & drop file loading
-- Real-time G-code editing
-- 60fps with 100k+ moves
-
-Perfect for verifying your program before walking over to the machine!
 
 ## Project Structure
 
@@ -164,35 +239,33 @@ swarf/
 │   ├── parser/          # Recursive descent parser
 │   ├── ast/             # Abstract syntax tree
 │   ├── codegen/         # G-code generator
-│   └── validator/       # Safety checker
+│   ├── validator/       # Safety checker
+│   ├── black_book/      # Feeds/speeds database
+│   └── post/            # Post-processors
 ├── examples/            # Sample .dsl files
-├── docs/
-│   └── img/            # Documentation images
-├── logo/
-│   └── swarf-logo.png  # Project logo
+├── swarf-viz-wasm/      # 3D WebGL visualizer
+├── DSL.md              # DSL specification
 └── README.md
 ```
-
-## OpenClaw Skill
-
-swarf is also available as an OpenClaw skill for integration with AI agents:
-
-```bash
-clawhub run swarf --prompt "profile a fin 1/16 wide x 1/4 tall, 1/8 endmill, 0.003 WOC"
-```
-
-See [agent-skills](https://github.com/FuturePresentLabs/agent-skills) for the skill implementation.
 
 ## Safety
 
 swarf includes validation to catch common errors:
-- Tool length vs cut depth (collision detection)
-- Spindle RPM limits
-- Feed rate limits
-- Rapid moves into workpiece
-- Invalid geometry (negative dimensions, etc.)
+- **Work hardening** — Low feed warnings for stainless/titanium
+- **Tool deflection** — L/D ratio checks
+- **Tool length vs cut depth** — Collision detection
+- **RPM limits** — By tool diameter and material
+- **Feed rate limits** — Machine capacity checks
 
 **Always verify G-code before running on a machine!**
+
+## Roadmap
+
+- [ ] OpenClaw skill for AI agent integration
+- [ ] Pattern operations (grid, circle, line)
+- [ ] Tool library JSON
+- [ ] Advanced profiling (pocket islands, adaptive clearing)
+- [ ] Surface finish estimation
 
 ## License
 
@@ -202,6 +275,9 @@ This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU Affero General Public License as published by the Free
 Software Foundation, either version 3 of the License, or (at your option) any
 later version.
+
+Contributors must sign the CLA assigning copyright to Future Present Labs LLC.
+See [CLA.md](CLA.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
