@@ -2,7 +2,7 @@
 name = "swarf-viz-wasm"
 version = "0.1.0"
 edition = "2021"
-authors = ["Future Present Labs"]
+authors = ["Future Present Labs LLC <contact@futurepresentlabs.com>"]
 description = "WASM 3D G-code visualizer for swarf"
 license = "AGPL-3.0"
 repository = "https://github.com/FuturePresentLabs/swarf"
