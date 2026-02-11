@@ -48,17 +48,53 @@ fn main() {
             #[cfg(feature = "viz")]
             {
                 if args.len() < 3 {
-                    eprintln!("Usage: swarf --viz [--2d] <gcode-file.nc>");
-                    eprintln!("  --2d  Use 2D canvas view (default is 3D if available)");
+                    eprintln!("Usage: swarf --viz [--2d] [--png <output.png>] <gcode-file.nc>");
+                    eprintln!("  --2d          Use 2D canvas view (default is 3D if available)");
+                    eprintln!("  --png <file>  Export to PNG file instead of starting server");
                     std::process::exit(1);
                 }
-                
+
                 // Check for --2d flag
                 let use_2d = args.iter().any(|a| a == "--2d");
-                let file_arg = if args[2] == "--2d" { args[3].clone() } else { args[2].clone() };
-                
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                rt.block_on(viz::runviz(file_arg, use_2d));
+
+                // Check for --png flag
+                let png_output = args.iter().position(|a| a == "--png")
+                    .and_then(|i| args.get(i + 1));
+
+                // Find the file argument (first non-flag argument after command)
+                let file_arg = args.iter().skip(2)
+                    .filter(|a| !a.starts_with("--"))
+                    .filter(|a| {
+                        // Skip the value after --png
+                        if let Some(png_idx) = args.iter().position(|x| x == "--png") {
+                            if args.get(png_idx + 1) == Some(a) {
+                                return false;
+                            }
+                        }
+                        true
+                    })
+                    .next()
+                    .cloned();
+
+                let file_arg = match file_arg {
+                    Some(f) => f,
+                    None => {
+                        eprintln!("Error: No G-code file specified");
+                        std::process::exit(1);
+                    }
+                };
+
+                if let Some(output) = png_output {
+                    // Export to PNG
+                    if let Err(e) = viz::export_to_png(&file_arg, output, 800, 600) {
+                        eprintln!("Error exporting PNG: {}", e);
+                        std::process::exit(1);
+                    }
+                } else {
+                    // Start viz server
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    rt.block_on(viz::runviz(file_arg, use_2d));
+                }
             }
             #[cfg(not(feature = "viz"))]
             {

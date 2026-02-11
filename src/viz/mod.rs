@@ -47,16 +47,14 @@ pub async fn runviz(gcode_file: String, use_2d: bool) {
     
     // Use 3D viz if available and not forced to 2D
     #[cfg(feature = "viz-3d")]
-    let use_3d = !use_2d;
-    
-    #[cfg(not(feature = "viz-3d"))]
-    let use_3d = false;
-    
-    let html = if use_3d {
+    let html = if !use_2d {
         INDEX_HTML_3D.to_string()
     } else {
         INDEX_HTML.replace("{{MODE}}", view_mode)
     };
+    
+    #[cfg(not(feature = "viz-3d"))]
+    let html = INDEX_HTML.replace("{{MODE}}", view_mode);
     
     // File watcher
     let watch_path = file_path.clone();
@@ -167,7 +165,7 @@ fn parse_gcode(path: &str) -> Toolpath {
     
     let mut lines: Vec<Line> = Vec::new();
     let mut rapids: Vec<Line> = Vec::new();
-    let mut arcs: Vec<ArcMove> = Vec::new();
+    let arcs: Vec<ArcMove> = Vec::new();
     
     let mut x = 0.0;
     let mut y = 0.0;
@@ -459,3 +457,124 @@ static INDEX_HTML_3D: &str = r#"<!DOCTYPE html>
     </div>
 </body>
 </html>"#;
+
+/// Export the toolpath visualization to a PNG file
+pub fn export_to_png(gcode_file: &str, output_path: &str, width: u32, height: u32) -> Result<(), Box<dyn std::error::Error>> {
+    use image::{RgbImage, Rgb};
+
+    let toolpath = parse_gcode(&gcode_file.to_string());
+
+    // Create image buffer with dark background
+    let mut img = RgbImage::from_pixel(width, height, Rgb([26, 26, 26]));
+
+    // Calculate scale and offset to fit toolpath in image
+    let bounds = &toolpath.bounds;
+    let margin = 50.0;
+
+    let x_range = bounds.max_x - bounds.min_x;
+    let y_range = bounds.max_y - bounds.min_y;
+
+    if x_range > 0.0 && y_range > 0.0 {
+        let scale_x = (width as f64 - 2.0 * margin) / x_range;
+        let scale_y = (height as f64 - 2.0 * margin) / y_range;
+        let scale = scale_x.min(scale_y);
+
+        let offset_x = (width as f64 - x_range * scale) / 2.0 - bounds.min_x * scale;
+        let offset_y = (height as f64 - y_range * scale) / 2.0 + bounds.min_y * scale;
+
+        // Helper to transform world coords to image coords
+        let world_to_screen = |x: f64, y: f64| -> (i32, i32) {
+            let sx = (x * scale + offset_x) as i32;
+            let sy = (height as f64 - (y * scale + offset_y)) as i32;
+            (sx, sy)
+        };
+
+        // Draw bounds rectangle
+        let (x1, y1) = world_to_screen(bounds.min_x, bounds.min_y);
+        let (x2, y2) = world_to_screen(bounds.max_x, bounds.max_y);
+        draw_rect(&mut img, x1, y1, x2, y2, Rgb([100, 100, 100]));
+
+        // Draw rapids (grey)
+        for line in &toolpath.rapids {
+            let (x1, y1) = world_to_screen(line.x1, line.y1);
+            let (x2, y2) = world_to_screen(line.x2, line.y2);
+            draw_line(&mut img, x1, y1, x2, y2, Rgb([102, 102, 102]));
+        }
+
+        // Draw cuts (amber/gold)
+        for line in &toolpath.lines {
+            let (x1, y1) = world_to_screen(line.x1, line.y1);
+            let (x2, y2) = world_to_screen(line.x2, line.y2);
+            draw_line(&mut img, x1, y1, x2, y2, Rgb([255, 170, 0]));
+        }
+
+        // Draw start point (green)
+        if let Some(first) = toolpath.lines.first() {
+            let (sx, sy) = world_to_screen(first.x1, first.y1);
+            draw_circle(&mut img, sx, sy, 5, Rgb([0, 255, 0]));
+        }
+    }
+
+    // Save image
+    img.save(output_path)?;
+    println!("✓ Exported to {}", output_path);
+    println!("  Dimensions: {}x{}", width, height);
+    println!("  Bounds: X{:.3} to {:.3}, Y{:.3} to {:.3}",
+        bounds.min_x, bounds.max_x, bounds.min_y, bounds.max_y);
+
+    Ok(())
+}
+
+/// Draw a line on the image using Bresenham's algorithm
+fn draw_line(img: &mut image::RgbImage, x0: i32, y0: i32, x1: i32, y1: i32, color: image::Rgb<u8>) {
+    let mut x0 = x0;
+    let mut y0 = y0;
+    let dx = (x1 - x0).abs();
+    let dy = (y1 - y0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx - dy;
+
+    loop {
+        if x0 >= 0 && x0 < img.width() as i32 && y0 >= 0 && y0 < img.height() as i32 {
+            img.put_pixel(x0 as u32, y0 as u32, color);
+        }
+
+        if x0 == x1 && y0 == y1 {
+            break;
+        }
+
+        let e2 = 2 * err;
+        if e2 > -dy {
+            err -= dy;
+            x0 += sx;
+        }
+        if e2 < dx {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+/// Draw a rectangle outline
+fn draw_rect(img: &mut image::RgbImage, x1: i32, y1: i32, x2: i32, y2: i32, color: image::Rgb<u8>) {
+    draw_line(img, x1, y1, x2, y1, color);
+    draw_line(img, x2, y1, x2, y2, color);
+    draw_line(img, x2, y2, x1, y2, color);
+    draw_line(img, x1, y2, x1, y1, color);
+}
+
+/// Draw a filled circle
+fn draw_circle(img: &mut image::RgbImage, cx: i32, cy: i32, r: i32, color: image::Rgb<u8>) {
+    for y in -r..=r {
+        for x in -r..=r {
+            if x * x + y * y <= r * r {
+                let px = cx + x;
+                let py = cy + y;
+                if px >= 0 && px < img.width() as i32 && py >= 0 && py < img.height() as i32 {
+                    img.put_pixel(px as u32, py as u32, color);
+                }
+            }
+        }
+    }
+}
