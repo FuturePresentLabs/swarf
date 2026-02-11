@@ -3,7 +3,7 @@
 //! Mach3 has limited canned cycle support. We'll convert G83/G81 to long-form G-code.
 
 use crate::codegen::GCodeOutput;
-use crate::post::{PostProcessor, g83_to_long_form, g81_to_long_form};
+use crate::post::{PostProcessor, g83_to_long_form, g81_to_long_form, g82_to_long_form};
 
 pub struct Mach3Post;
 
@@ -76,7 +76,7 @@ impl PostProcessor for Mach3Post {
                 let z = extract_param(code, 'Z').unwrap_or(-0.5);
                 let f = extract_param(code, 'F').unwrap_or(last_f);
                 g81_params = Some((last_x, last_y, r, z.abs()));
-                
+
                 // Convert to long-form and add
                 if let Some((x, y, r_plane, z_depth)) = g81_params {
                     let long_form = g81_to_long_form(x, y, r_plane, z_depth, f);
@@ -86,6 +86,38 @@ impl PostProcessor for Mach3Post {
                 }
                 in_g81 = false;
                 g81_params = None;
+                continue;
+            }
+
+            // Detect G82 cycles (drill with dwell)
+            if code.contains("G82") {
+                let r = extract_param(code, 'R').unwrap_or(0.1);
+                let z = extract_param(code, 'Z').unwrap_or(-0.5);
+                let p = extract_param(code, 'P').unwrap_or(0.5); // Dwell time in seconds
+                let f = extract_param(code, 'F').unwrap_or(last_f);
+
+                // Convert to long-form with dwell
+                let long_form = g82_to_long_form(last_x, last_y, r, z.abs(), p, f);
+                for lf_line in long_form {
+                    output_lines.push(lf_line);
+                }
+                continue;
+            }
+
+            // Detect G73 cycles (high-speed peck)
+            if code.contains("G73") {
+                let r = extract_param(code, 'R').unwrap_or(0.1);
+                let z = extract_param(code, 'Z').unwrap_or(-0.5);
+                let q = extract_param(code, 'Q').unwrap_or(0.25);
+                let f = extract_param(code, 'F').unwrap_or(last_f);
+
+                // Convert G73 to G83-style (full retract) for Mach3 compatibility
+                // G73 is chip-breaking (short retract), G83 is full retract
+                // Mach3 may not support G73, so we use G83 behavior
+                let long_form = g83_to_long_form(last_x, last_y, r, z.abs(), q, f);
+                for lf_line in long_form {
+                    output_lines.push(lf_line);
+                }
                 continue;
             }
             
@@ -163,16 +195,62 @@ mod tests {
             line_number: 50,
             step: 10,
         };
-        
+
         let post = Mach3Post;
         let output = post.process(&input);
-        
+
         // Should have expanded G83 to long-form
         assert!(output.lines.iter().any(|l| l.contains("G01 Z-0.2500")));
         assert!(output.lines.iter().any(|l| l.contains("G00 Z0.1000")));
-        
+
         // Should NOT have G83 or G80
         assert!(!output.lines.iter().any(|l| l.contains("G83")));
+        assert!(!output.lines.iter().any(|l| l.contains("G80")));
+    }
+
+    #[test]
+    fn test_mach3_converts_g82() {
+        let input = GCodeOutput {
+            lines: vec![
+                "N0010 G00 X1.0000 Y0.5000".to_string(),
+                "N0020 G82 R0.1 Z-0.25 P0.5 F15.0".to_string(),
+                "N0030 G80".to_string(),
+            ],
+            line_number: 40,
+            step: 10,
+        };
+
+        let post = Mach3Post;
+        let output = post.process(&input);
+
+        // Should have G04 dwell
+        assert!(output.lines.iter().any(|l| l.contains("G04")));
+
+        // Should NOT have G82 or G80
+        assert!(!output.lines.iter().any(|l| l.contains("G82")));
+        assert!(!output.lines.iter().any(|l| l.contains("G80")));
+    }
+
+    #[test]
+    fn test_mach3_converts_g73() {
+        let input = GCodeOutput {
+            lines: vec![
+                "N0010 G00 X1.0000 Y0.5000".to_string(),
+                "N0020 G73 R0.1 Z-0.50 Q0.20 F12.0".to_string(),
+                "N0030 G80".to_string(),
+            ],
+            line_number: 40,
+            step: 10,
+        };
+
+        let post = Mach3Post;
+        let output = post.process(&input);
+
+        // G73 should be converted to G83-style (long-form)
+        assert!(output.lines.iter().any(|l| l.contains("G01 Z-0.2000")));
+
+        // Should NOT have G73 or G80
+        assert!(!output.lines.iter().any(|l| l.contains("G73")));
         assert!(!output.lines.iter().any(|l| l.contains("G80")));
     }
 }

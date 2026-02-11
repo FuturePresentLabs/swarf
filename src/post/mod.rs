@@ -116,6 +116,17 @@ pub fn g81_to_long_form(x: f64, y: f64, r_plane: f64, z_depth: f64, feed: f64) -
     ]
 }
 
+/// Convert G82 drill with dwell to long-form
+pub fn g82_to_long_form(x: f64, y: f64, r_plane: f64, z_depth: f64, dwell_secs: f64, feed: f64) -> Vec<String> {
+    vec![
+        format!("G00 X{:.4} Y{:.4}", x, y),
+        format!("G00 Z{:.4}", r_plane),
+        format!("G01 Z-{:.4} F{:.1}", z_depth, feed),
+        format!("G04 P{:.2}", dwell_secs), // Dwell at bottom
+        format!("G00 Z{:.4}", r_plane),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,9 +145,19 @@ mod tests {
     #[test]
     fn test_g81_long_form() {
         let lines = g81_to_long_form(1.0, 0.5, 0.1, 0.25, 15.0);
-        
+
         assert_eq!(lines.len(), 4);
         assert!(lines[0].contains("G00 X1.0000 Y0.5000"));
         assert!(lines[2].contains("G01 Z-0.2500"));
+    }
+
+    #[test]
+    fn test_g82_long_form() {
+        let lines = g82_to_long_form(1.0, 0.5, 0.1, 0.25, 0.5, 15.0);
+
+        assert_eq!(lines.len(), 5);
+        assert!(lines[0].contains("G00 X1.0000 Y0.5000"));
+        assert!(lines[2].contains("G01 Z-0.2500"));
+        assert!(lines[3].contains("G04 P0.50")); // Dwell line
     }
 }
