@@ -3,6 +3,7 @@ mod lexer;
 mod parser;
 mod codegen;
 mod validator;
+pub mod black_book;
 
 #[cfg(feature = "viz")]
 mod viz;

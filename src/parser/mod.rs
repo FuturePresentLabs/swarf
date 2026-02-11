@@ -125,11 +125,37 @@ impl Parser {
             let op = match self.peek() {
                 Some(Token::Tool) => self.parse_tool_change()?,
                 Some(Token::Spindle) => self.parse_spindle()?,
-                Some(Token::Drill) => self.parse_drill()?,
-                Some(Token::Pocket) => self.parse_pocket()?,
+                Some(Token::Drill) => {
+                    // Check if this is v2 syntax by looking ahead
+                    // v2: drill <dia> at ... 
+                    // v1: drill at ...
+                    if self.is_drill_v2() {
+                        Operation::DrillV2(self.parse_drill_v2()?)
+                    } else {
+                        self.parse_drill()?
+                    }
+                }
+                Some(Token::Pocket) => {
+                    // Check if v2 syntax
+                    if self.is_pocket_v2() {
+                        Operation::PocketV2(self.parse_pocket_v2()?)
+                    } else {
+                        self.parse_pocket()?
+                    }
+                }
                 Some(Token::Profile) => self.parse_profile()?,
                 Some(Token::Face) => self.parse_face()?,
                 Some(Token::Tap) => self.parse_tap()?,
+                Some(Token::Part) => Operation::PartDef(self.parse_part_def()?),
+                Some(Token::Setup) => Operation::Setup(self.parse_setup_block()?),
+                Some(Token::Cut) => Operation::Cut(self.parse_cut_op()?),
+                Some(Token::Clear) => Operation::Clear(self.parse_cut_op().map(|c| ClearOp {
+                    direction: c.direction,
+                    sweep: c.sweep,
+                    depth: c.depth,
+                    height: c.height,
+                    z_constraint: c.z_constraint,
+                })?),
                 Some(_) => {
                     // Unknown token, skip for now
                     self.advance();
@@ -142,6 +168,38 @@ impl Parser {
         }
 
         Ok(ops)
+    }
+
+    fn is_drill_v2(&self) -> bool {
+        // Look ahead: drill <number> at ... (v2)
+        // vs drill at ... (v1)
+        if let Some((Token::Drill, _)) = self.tokens.get(self.position) {
+            if let Some((Token::Number(_), _)) = self.tokens.get(self.position + 1) {
+                return true;
+            }
+            if let Some((Token::Fraction(_), _)) = self.tokens.get(self.position + 1) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn is_pocket_v2(&self) -> bool {
+        // v2 uses different shape specification
+        // Look for pocket followed by rect/circle or dimensions without 'at'
+        if let Some((Token::Pocket, _)) = self.tokens.get(self.position) {
+            // If followed by dimensions and then 'at', it's v2
+            let mut pos = self.position + 1;
+            // Skip shape keyword if present
+            if let Some((Token::Rect | Token::Rectangle | Token::Circle, _)) = self.tokens.get(pos) {
+                pos += 1;
+            }
+            // Should be numbers (dimensions)
+            if let Some((Token::Number(_) | Token::Fraction(_), _)) = self.tokens.get(pos) {
+                return true;
+            }
+        }
+        false
     }
 
     fn parse_tool_change(&mut self) -> Result<Operation> {
@@ -587,7 +645,452 @@ impl Parser {
             line: self.current_line,
         }
     }
+
+    // ============================================
+    // New DSL v2 parsing
+    // ============================================
+
+    fn parse_part_def(&mut self) -> Result<PartDef> {
+        self.consume(Token::Part)?;
+        let name = self.expect_string()?;
+        
+        let existing = self.peek() == Some(&Token::Existing);
+        if existing {
+            self.advance();
+        }
+        
+        // Optional stock definition
+        let stock = if self.peek() == Some(&Token::Stock) {
+            Some(self.parse_stock_def()?)
+        } else {
+            None
+        };
+        
+        Ok(PartDef {
+            name,
+            stock,
+            existing,
+        })
+    }
+    
+    fn parse_stock_def(&mut self) -> Result<StockDef> {
+        // Parse as: 3x2x0.5 6061-T6 or material first
+        let mut size_x = 0.0;
+        let mut size_y = 0.0;
+        let mut size_z = 0.0;
+        let mut material = String::new();
+        
+        // Try to parse dimensions or material
+        if let Some(Token::Number(Some(n))) = self.peek() {
+            size_x = *n;
+            self.advance();
+            
+            // Check for x separator
+            if self.peek() == Some(&Token::X) {
+                self.advance();
+            }
+            
+            size_y = self.expect_number()?;
+            
+            if self.peek() == Some(&Token::X) {
+                self.advance();
+            }
+            
+            size_z = self.expect_number()?;
+            
+            // Now get material
+            material = self.expect_string()?;
+        } else {
+            // Material first
+            material = self.expect_string()?;
+            size_x = self.expect_number()?;
+            self.consume(Token::X)?;
+            size_y = self.expect_number()?;
+            self.consume(Token::X)?;
+            size_z = self.expect_number()?;
+        }
+        
+        Ok(StockDef {
+            material,
+            size_x,
+            size_y,
+            size_z,
+        })
+    }
+    
+    fn parse_setup_block(&mut self) -> Result<SetupBlock> {
+        self.consume(Token::Setup)?;
+        self.consume(Token::LBrace)?;
+        
+        let mut zero = ZeroConfig {
+            x_ref: XRef::Left,
+            y_ref: YRef::Front,
+            z_ref: ZRef::Top,
+        };
+        let mut z_min = None;
+        let mut y_limit = None;
+        
+        while self.peek() != Some(&Token::RBrace) {
+            match self.peek() {
+                Some(Token::Zero) => {
+                    self.advance();
+                    zero = self.parse_zero_config()?;
+                }
+                Some(Token::ZMin) => {
+                    self.advance();
+                    z_min = Some(self.expect_number()?);
+                }
+                Some(Token::YLimit) => {
+                    self.advance();
+                    y_limit = Some(self.expect_number()?);
+                }
+                _ => {
+                    return Err(self.error("expected 'zero', 'z-min', or 'y-limit' in setup block"));
+                }
+            }
+            
+            self.skip_newlines();
+        }
+        
+        self.consume(Token::RBrace)?;
+        
+        Ok(SetupBlock {
+            zero,
+            z_min,
+            y_limit,
+        })
+    }
+    
+    fn parse_zero_config(&mut self) -> Result<ZeroConfig> {
+        // Parse: "bottom-right bottom" or "top-left top"
+        let x_ref = match self.peek() {
+            Some(Token::Left) => { self.advance(); XRef::Left }
+            Some(Token::Right) => { self.advance(); XRef::Right }
+            Some(Token::Center) => { self.advance(); XRef::Center }
+            _ => return Err(self.error("expected left, right, or center")),
+        };
+        
+        let y_ref = match self.peek() {
+            Some(Token::Front) => { self.advance(); YRef::Front }
+            Some(Token::Back) => { self.advance(); YRef::Back }
+            Some(Token::Center) => { self.advance(); YRef::Center }
+            _ => return Err(self.error("expected front, back, or center")),
+        };
+        
+        let z_ref = match self.peek() {
+            Some(Token::Top) => { self.advance(); ZRef::Top }
+            Some(Token::Bottom) => { self.advance(); ZRef::Bottom }
+            Some(Token::Center) => { self.advance(); ZRef::Center }
+            _ => return Err(self.error("expected top, bottom, or center")),
+        };
+        
+        Ok(ZeroConfig { x_ref, y_ref, z_ref })
+    }
+    
+    fn parse_cut_op(&mut self) -> Result<CutOp> {
+        self.consume(Token::Cut)?;
+        let direction = self.parse_direction()?;
+        
+        let sweep = self.expect_number_or_fraction()?;
+        let depth = self.expect_number_or_fraction()?;
+        let height = self.expect_number_or_fraction()?;
+        
+        let z_constraint = self.parse_z_constraint()?;
+        
+        Ok(CutOp {
+            direction,
+            sweep,
+            depth,
+            height,
+            z_constraint,
+        })
+    }
+    
+    fn parse_direction(&mut self) -> Result<Direction> {
+        match self.peek() {
+            Some(Token::Direction(dir)) => {
+                let dir_str = dir.clone().to_lowercase();
+                self.advance();
+                match dir_str.as_str() {
+                    "x+" => Ok(Direction::XPositive),
+                    "x-" => Ok(Direction::XNegative),
+                    "y+" => Ok(Direction::YPositive),
+                    "y-" => Ok(Direction::YNegative),
+                    "z+" => Ok(Direction::ZPositive),
+                    "z-" => Ok(Direction::ZNegative),
+                    _ => Err(self.error("invalid direction")),
+                }
+            }
+            _ => Err(self.error("expected direction like X+, Y-, Z+, etc.")),
+        }
+    }
+    
+    fn parse_z_constraint(&mut self) -> Result<ZConstraint> {
+        match self.peek() {
+            Some(Token::Direction(dir)) => {
+                let d = dir.clone();
+                self.advance();
+                match d.as_str() {
+                    "Z+" | "z+" => Ok(ZConstraint::Positive),
+                    "Z-" | "z-" => Ok(ZConstraint::Negative),
+                    _ => Err(self.error("expected Z+ or Z- for Z constraint")),
+                }
+            }
+            _ => Ok(ZConstraint::Free),
+        }
+    }
+
+    fn parse_drill_v2(&mut self) -> Result<DrillV2Op> {
+        self.consume(Token::Drill)?;
+        let diameter = self.expect_number_or_fraction()?;
+        
+        self.consume(Token::At)?;
+        let position = self.parse_at_position()?;
+        
+        let depth = if self.peek() == Some(&Token::Thru) {
+            self.advance();
+            DrillDepth::Thru
+        } else if self.peek() == Some(&Token::Depth) {
+            self.advance();
+            DrillDepth::Depth(self.expect_number_or_fraction()?)
+        } else {
+            // Could be just a number
+            DrillDepth::Depth(self.expect_number_or_fraction()?)
+        };
+        
+        Ok(DrillV2Op {
+            diameter,
+            position,
+            depth,
+        })
+    }
+
+    fn parse_pocket_v2(&mut self) -> Result<PocketV2Op> {
+        self.consume(Token::Pocket)?;
+        
+        // Parse shape: either rect/circle or just dimensions
+        let (shape, depth) = if self.peek() == Some(&Token::Rect) || self.peek() == Some(&Token::Rectangle) {
+            self.advance();
+            let width = self.expect_number_or_fraction()?;
+            let height = self.expect_number_or_fraction()?;
+            let depth = self.expect_number_or_fraction()?;
+            (PocketShape::Rect { width, height }, depth)
+        } else if self.peek() == Some(&Token::Circle) {
+            self.advance();
+            let diameter = self.expect_number_or_fraction()?;
+            let depth = self.expect_number_or_fraction()?;
+            (PocketShape::Circle { diameter }, depth)
+        } else {
+            // Just dimensions: width height depth
+            let width = self.expect_number_or_fraction()?;
+            let height = self.expect_number_or_fraction()?;
+            let depth = self.expect_number_or_fraction()?;
+            (PocketShape::Rect { width, height }, depth)
+        };
+        
+        self.consume(Token::At)?;
+        let position = self.parse_at_position()?;
+        
+        Ok(PocketV2Op {
+            shape,
+            position,
+            depth,
+        })
+    }
+
+    fn parse_at_position(&mut self) -> Result<Position> {
+        match self.peek() {
+            Some(Token::Identifier(s)) if s == "zero" => {
+                self.advance();
+                Ok(Position::new(0.0, 0.0))
+            }
+            Some(Token::Zero) => {
+                self.advance();
+                Ok(Position::new(0.0, 0.0))
+            }
+            Some(Token::Identifier(s)) if s == "stock" => {
+                self.advance();
+                // Stock center - would need stock dimensions
+                Ok(Position::new(0.0, 0.0))
+            }
+            _ => {
+                let x = self.expect_number_or_fraction()?;
+                let y = self.expect_number_or_fraction()?;
+                Ok(Position::new(x, y))
+            }
+        }
+    }
+    
+    fn expect_number_or_fraction(&mut self) -> Result<f64> {
+        match self.peek() {
+            Some(Token::Number(Some(n))) => {
+                let val = *n;
+                self.advance();
+                Ok(val)
+            }
+            Some(Token::Fraction(Some(n))) => {
+                let val = *n;
+                self.advance();
+                Ok(val)
+            }
+            Some(Token::Number(None)) | Some(Token::Fraction(None)) => {
+                Err(ParseError::InvalidNumber)
+            }
+            Some(other) => Err(ParseError::UnexpectedToken {
+                expected: "number or fraction".to_string(),
+                got: format!("{:?}", other),
+            }),
+            None => Err(ParseError::UnexpectedEOF),
+        }
+    }
+    
+    fn expect_string(&mut self) -> Result<String> {
+        match self.peek() {
+            Some(Token::String(s)) => {
+                let val = s.clone();
+                self.advance();
+                Ok(val)
+            }
+            Some(Token::Identifier(s)) => {
+                let val = s.clone();
+                self.advance();
+                Ok(val)
+            }
+            Some(other) => Err(ParseError::UnexpectedToken {
+                expected: "string or identifier".to_string(),
+                got: format!("{:?}", other),
+            }),
+            None => Err(ParseError::UnexpectedEOF),
+        }
+    }
+    
+    fn get_current_token_text(&self) -> String {
+        if let Some((_, span)) = self.tokens.get(self.position) {
+            // This would need the original input to work properly
+            // For now, return a placeholder
+            String::new()
+        } else {
+            String::new()
+        }
+    }
 }
 
-// Add missing token variant
-// Token types are already imported from lexer
+// Add missing token variants for the new DSL
+// These should be added to the Token enum in lexer/mod.rs
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::lex;
+
+    #[test]
+    fn test_parse_new_dsl_syntax() {
+        let input = r#"part housing-mod existing
+setup {
+    zero right back bottom
+    z-min 0
+    y-limit -0.25
+}
+cut Y+ 0.625 0.125 0.3 Z+"#;
+
+        let tokens = lex(input);
+        let mut parser = Parser::new(tokens);
+        
+        // Parse part definition
+        let part = parser.parse_part_def().expect("should parse part def");
+        assert_eq!(part.name, "housing-mod");
+        assert!(part.existing);
+        
+        // Skip newlines
+        parser.skip_newlines();
+        
+        // Parse setup block
+        let setup = parser.parse_setup_block().expect("should parse setup");
+        assert_eq!(setup.z_min, Some(0.0));
+        assert_eq!(setup.y_limit, Some(-0.25));
+        
+        // Skip newlines
+        parser.skip_newlines();
+        
+        // Parse cut operation
+        let cut = parser.parse_cut_op().expect("should parse cut op");
+        assert_eq!(cut.sweep, 0.625);
+        assert_eq!(cut.depth, 0.125);
+        assert_eq!(cut.height, 0.3);
+        match cut.z_constraint {
+            ZConstraint::Positive => {},
+            _ => panic!("expected Z+ constraint"),
+        }
+    }
+
+    #[test]
+    fn test_fraction_parsing() {
+        let input = "cut Y+ 5/8 1/8 3/10 Z+";
+        let tokens = lex(input);
+        
+        // Check that fractions are tokenized correctly
+        let token_types: Vec<_> = tokens.iter().map(|(t, _)| t).collect();
+        assert!(matches!(token_types[2], Token::Fraction(Some(0.625))));
+        assert!(matches!(token_types[3], Token::Fraction(Some(0.125))));
+    }
+
+    #[test]
+    fn test_direction_tokenizing() {
+        let input = "Y+ X- Z+";
+        let tokens = lex(input);
+        
+        assert!(matches!(&tokens[0].0, Token::Direction(s) if s == "Y+"));
+        assert!(matches!(&tokens[1].0, Token::Direction(s) if s == "X-"));
+        assert!(matches!(&tokens[2].0, Token::Direction(s) if s == "Z+"));
+    }
+
+    #[test]
+    fn test_drill_v2_parsing() {
+        let input = "drill 0.25 at 1.0 0.5 thru";
+        let tokens = lex(input);
+        let mut parser = Parser::new(tokens);
+        
+        let op = parser.parse_drill_v2().expect("should parse drill v2");
+        assert_eq!(op.diameter, 0.25);
+        assert_eq!(op.position.x, 1.0);
+        assert_eq!(op.position.y, 0.5);
+        assert!(matches!(op.depth, DrillDepth::Thru));
+    }
+
+    #[test]
+    fn test_drill_v2_with_depth() {
+        let input = "drill 1/4 at zero depth 0.5";
+        let tokens = lex(input);
+        let mut parser = Parser::new(tokens);
+        
+        let op = parser.parse_drill_v2().expect("should parse drill v2 with depth");
+        assert_eq!(op.diameter, 0.25);
+        assert_eq!(op.position.x, 0.0);
+        assert_eq!(op.position.y, 0.0);
+        assert!(matches!(op.depth, DrillDepth::Depth(0.5)));
+    }
+
+    #[test]
+    fn test_pocket_v2_rect() {
+        let input = "pocket rect 2.0 1.5 0.25 at 0.5 0.5";
+        let tokens = lex(input);
+        let mut parser = Parser::new(tokens);
+        
+        let op = parser.parse_pocket_v2().expect("should parse pocket v2 rect");
+        assert!(matches!(&op.shape, PocketShape::Rect { width, height } if *width == 2.0 && *height == 1.5));
+        assert_eq!(op.depth, 0.25);
+        assert_eq!(op.position.x, 0.5);
+        assert_eq!(op.position.y, 0.5);
+    }
+
+    #[test]
+    fn test_pocket_v2_circle() {
+        let input = "pocket circle 1.0 0.25 at 1.0 1.0";
+        let tokens = lex(input);
+        let mut parser = Parser::new(tokens);
+        
+        let op = parser.parse_pocket_v2().expect("should parse pocket v2 circle");
+        assert!(matches!(&op.shape, PocketShape::Circle { diameter } if *diameter == 1.0));
+        assert_eq!(op.depth, 0.25);
+    }
+}

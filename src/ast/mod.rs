@@ -58,6 +58,13 @@ pub enum Operation {
     Face(FaceOp),
     Tap(TapOp),
     Comment(String),
+    // New DSL v2 operations
+    PartDef(PartDef),
+    Setup(SetupBlock),
+    Cut(CutOp),
+    Clear(ClearOp),
+    DrillV2(DrillV2Op),
+    PocketV2(PocketV2Op),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -205,4 +212,133 @@ pub struct Point3D {
     pub x: f64,
     pub y: f64,
     pub z: f64,
+}
+
+// ============================================
+// New DSL v2 - Part-based machining
+// ============================================
+
+/// Part definition - describes what we're making
+#[derive(Debug, Clone, PartialEq)]
+pub struct PartDef {
+    pub name: String,
+    pub stock: Option<StockDef>,
+    pub existing: bool,  // true = modifying existing part, false = from stock
+}
+
+/// Stock definition
+#[derive(Debug, Clone, PartialEq)]
+pub struct StockDef {
+    pub material: String,  // e.g., "6061-T6", "1018"
+    pub size_x: f64,
+    pub size_y: f64,
+    pub size_z: f64,
+}
+
+/// Setup configuration
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetupBlock {
+    pub zero: ZeroConfig,
+    pub z_min: Option<f64>,      // Hard Z floor - do not go below
+    pub y_limit: Option<f64>,    // Y travel limit (negative = behind tool)
+}
+
+/// Zero/origin configuration
+#[derive(Debug, Clone, PartialEq)]
+pub struct ZeroConfig {
+    pub x_ref: XRef,
+    pub y_ref: YRef,
+    pub z_ref: ZRef,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum XRef {
+    Left,
+    Right,
+    Center,
+    Value(f64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum YRef {
+    Front,
+    Back,
+    Center,
+    Value(f64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ZRef {
+    Top,
+    Bottom,
+    Center,
+    Value(f64),
+}
+
+/// Direction for cuts
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Direction {
+    XPositive,
+    XNegative,
+    YPositive,
+    YNegative,
+    ZPositive,
+    ZNegative,
+}
+
+/// Z constraint for operations
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ZConstraint {
+    Positive,   // Z+ - only climb, no plunge below Z0
+    Negative,   // Z- - only plunge
+    Free,       // No constraint
+    Min(f64),   // Hard floor at Z value
+}
+
+/// Cut operation - new simplified syntax
+#[derive(Debug, Clone, PartialEq)]
+pub struct CutOp {
+    pub direction: Direction,
+    pub sweep: f64,        // Width of cut pattern
+    pub depth: f64,        // Distance into material
+    pub height: f64,       // Z height of feature (for stepdown calc)
+    pub z_constraint: ZConstraint,
+}
+
+/// Clear operation - remove material
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClearOp {
+    pub direction: Direction,
+    pub sweep: f64,
+    pub depth: f64,
+    pub height: f64,
+    pub z_constraint: ZConstraint,
+}
+
+/// Drill operation - v2 simplified syntax
+#[derive(Debug, Clone, PartialEq)]
+pub struct DrillV2Op {
+    pub diameter: f64,
+    pub position: Position,
+    pub depth: DrillDepth,  // Thru or specific depth
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DrillDepth {
+    Thru,
+    Depth(f64),
+}
+
+/// Pocket operation - v2 simplified syntax
+#[derive(Debug, Clone, PartialEq)]
+pub struct PocketV2Op {
+    pub shape: PocketShape,
+    pub position: Position,
+    pub depth: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PocketShape {
+    Rect { width: f64, height: f64 },
+    Circle { diameter: f64 },
 }

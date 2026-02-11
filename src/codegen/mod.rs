@@ -99,7 +99,90 @@ impl CodeGenerator {
             Operation::Face(f) => self.emit_face(f),
             Operation::Tap(t) => self.emit_tap(t),
             Operation::Comment(c) => self.output.emit_comment(c),
+            Operation::PartDef(_) => {
+                // Part definition is metadata, no G-code emitted
+            }
+            Operation::Setup(setup) => self.emit_setup(setup),
+            Operation::Cut(cut) => self.emit_cut(cut),
+            Operation::Clear(clear) => self.emit_clear(clear),
+            Operation::DrillV2(drill) => self.emit_drill_v2(drill),
+            Operation::PocketV2(pocket) => self.emit_pocket_v2(pocket),
         }
+    }
+
+    fn emit_setup(&mut self, setup: &SetupBlock) {
+        self.output.emit_comment("SETUP BLOCK");
+        if let Some(z_min) = setup.z_min {
+            self.output.emit_comment(&format!("Z minimum: {}", z_min));
+        }
+        if let Some(y_limit) = setup.y_limit {
+            self.output.emit_comment(&format!("Y limit: {}", y_limit));
+        }
+    }
+
+    fn emit_cut(&mut self, cut: &CutOp) {
+        self.output.emit_comment(&format!(
+            "CUT {:?} sweep:{} depth:{} height:{}",
+            cut.direction, cut.sweep, cut.depth, cut.height
+        ));
+        // TODO: Generate actual toolpath based on direction and constraints
+        self.output.emit("; Cut operation - TODO");
+    }
+
+    fn emit_clear(&mut self, clear: &ClearOp) {
+        self.output.emit_comment(&format!(
+            "CLEAR {:?} sweep:{} depth:{} height:{}",
+            clear.direction, clear.sweep, clear.depth, clear.height
+        ));
+        // TODO: Generate actual toolpath
+        self.output.emit("; Clear operation - TODO");
+    }
+
+    fn emit_drill_v2(&mut self, drill: &DrillV2Op) {
+        self.output.emit_comment(&format!(
+            "DRILL dia:{} at X{:.4} Y{:.4}",
+            drill.diameter, drill.position.x, drill.position.y
+        ));
+        
+        // Move to position
+        self.output.emit(&format!(
+            "G00 X{:.4} Y{:.4}",
+            drill.position.x, drill.position.y
+        ));
+        
+        // Drill cycle based on depth
+        match &drill.depth {
+            DrillDepth::Thru => {
+                // Simple drill cycle - through
+                self.output.emit("G81 R0.1 Z-0.55 F15.0"); // TODO: calculate from tool
+            }
+            DrillDepth::Depth(z) => {
+                self.output.emit(&format!(
+                    "G81 R0.1 Z-{:.4} F15.0",
+                    z
+                ));
+            }
+        }
+    }
+
+    fn emit_pocket_v2(&mut self, pocket: &PocketV2Op) {
+        match &pocket.shape {
+            PocketShape::Rect { width, height } => {
+                self.output.emit_comment(&format!(
+                    "POCKET RECT {}x{} at X{:.4} Y{:.4} depth:{:.4}",
+                    width, height, pocket.position.x, pocket.position.y, pocket.depth
+                ));
+            }
+            PocketShape::Circle { diameter } => {
+                self.output.emit_comment(&format!(
+                    "POCKET CIRCLE dia:{} at X{:.4} Y{:.4} depth:{:.4}",
+                    diameter, pocket.position.x, pocket.position.y, pocket.depth
+                ));
+            }
+        }
+        
+        // TODO: Generate actual pocketing toolpath (adaptive or conventional)
+        self.output.emit("; Pocket operation - TODO");
     }
 
     fn emit_tool_change(&mut self, tc: &ToolChange) {

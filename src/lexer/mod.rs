@@ -11,6 +11,20 @@ pub enum Token {
     #[regex(r"-?\d+\.?\d*", |lex| lex.slice().parse::<f64>().ok())]
     Number(Option<f64>),
 
+    // Fractions like 5/8, 1/4
+    #[regex(r"\d+/\d+", |lex| {
+        let parts: Vec<&str> = lex.slice().split('/').collect();
+        if parts.len() == 2 {
+            if let (Ok(num), Ok(den)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>()) {
+                if den != 0.0 {
+                    return Some(num / den);
+                }
+            }
+        }
+        None
+    })]
+    Fraction(Option<f64>),
+
     #[regex(r#""[^"]*""#, |lex| lex.slice()[1..lex.slice().len()-1].to_string())]
     String(String),
 
@@ -120,6 +134,9 @@ pub enum Token {
     #[token("depth")]
     Depth,
 
+    #[token("thru")]
+    Thru,
+
     #[token("corner")]
     Corner,
 
@@ -199,17 +216,87 @@ pub enum Token {
     #[token("=")]
     Equals,
 
-    #[token("x")]
+    #[token("x", priority = 2)]
     X,
 
-    #[token("y")]
+    #[token("y", priority = 2)]
     Y,
 
-    #[token("z")]
+    #[token("z", priority = 2)]
     Z,
 
     #[token("rotate")]
     Rotate,
+
+    // Position references
+    #[token("left")]
+    Left,
+
+    #[token("right")]
+    Right,
+
+    #[token("front")]
+    Front,
+
+    #[token("back")]
+    Back,
+
+    #[token("top")]
+    Top,
+
+    #[token("bottom")]
+    Bottom,
+
+    // Constraint keywords
+    #[token("min")]
+    Min,
+
+    #[token("limit")]
+    Limit,
+
+    #[token("z-min")]
+    ZMin,
+
+    #[token("y-limit")]
+    YLimit,
+
+    // Operators
+    #[token("+")]
+    Plus,
+
+    #[token("-")]
+    Minus,
+
+    // New DSL v2 - Part definition
+    #[token("part")]
+    Part,
+
+    #[token("existing")]
+    Existing,
+
+    #[token("setup")]
+    Setup,
+
+    #[token("zero")]
+    Zero,
+
+    // Direction keywords with +-
+    #[regex(r"[xyzXYZ][+-]", |lex| lex.slice().to_string())]
+    Direction(String),
+
+    // Cut operation
+    #[token("cut")]
+    Cut,
+
+    #[token("clear")]
+    Clear,
+
+    #[token("stock")]
+    Stock,
+
+    // Identifier for part names without quotes
+    #[regex(r"[a-zA-Z_][a-zA-Z0-9_-]*", |lex| lex.slice().to_string(), priority = 1)]
+    Identifier(String),
 
     // Newlines for statement separation
     #[regex(r"\n\s*\n", logos::skip)] // Skip blank lines

@@ -26,6 +26,7 @@ wgpu = "28.0.0"
 winit = "0.30.12"
 bytemuck = { version = "1.25.0", features = ["derive"] }
 cgmath = "0.18.0"
+uom = { version = "0.37.0", features = ["f64", "si"] }
 
 [dev-dependencies]
 pretty_assertions = "1.4"
