@@ -454,26 +454,139 @@ impl CodeGenerator {
         // Spindle speed
         self.output.emit(&format!("S{:.0} M03", rpm));
 
+        // Spindle speed
+        self.output.emit(&format!("S{:.0} M03", rpm));
+
         // Generate passes
         for pass_num in 1..=num_passes {
             let z_depth = (pass_num as f64 * stepdown).min(pocket.depth);
             self.output.emit_comment(&format!("Pass {}/{}: Z={:.3}", pass_num, num_passes, -z_depth));
 
-            // Move to start position at safe height
-            self.output.emit(&format!(
-                "G00 X{:.4} Y{:.4}",
-                pocket.position.x, pocket.position.y
-            ));
-
-            // Plunge to depth
-            self.output.emit(&format!("G01 Z-{:.4} F{:.1}", z_depth, feed_rate * 0.3));
-
-            // TODO: Generate actual pocketing path (spiral, zigzag, etc.)
-            self.output.emit(&format!("; Pocketing pass at Z-{:.4}", z_depth));
+            match &pocket.shape {
+                PocketShape::Rect { width, height } => {
+                    self.generate_rectangular_pocket(
+                        pocket.position.x, pocket.position.y,
+                        *width, *height, z_depth,
+                        tool_dia, stepover, feed_rate
+                    );
+                }
+                PocketShape::Circle { diameter } => {
+                    self.generate_circular_pocket(
+                        pocket.position.x, pocket.position.y,
+                        *diameter, z_depth,
+                        tool_dia, stepover, feed_rate
+                    );
+                }
+            }
         }
 
         // Retract
         self.output.emit("G00 Z0.1");
+    }
+
+    /// Generate zigzag raster pocket for rectangular pockets
+    #[allow(clippy::too_many_arguments)]
+    fn generate_rectangular_pocket(
+        &mut self,
+        center_x: f64, center_y: f64,
+        width: f64, height: f64,
+        depth: f64,
+        tool_dia: f64, stepover: f64, feed_rate: f64
+    ) {
+        // Calculate pocket bounds (leave stock for finish if needed)
+        let half_width = width / 2.0 - tool_dia / 2.0;
+        let half_height = height / 2.0 - tool_dia / 2.0;
+        let min_x = center_x - half_width;
+        let max_x = center_x + half_width;
+        let min_y = center_y - half_height;
+        let max_y = center_y + half_height;
+
+        // Rapid to start position (center of pocket)
+        self.output.emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
+
+        // Plunge to depth
+        self.output.emit(&format!("G01 Z-{:.4} F{:.1}", depth, feed_rate * 0.3));
+
+        // Calculate number of Y steps
+        let y_range = max_y - min_y;
+        let num_passes = (y_range / stepover).ceil() as i32;
+        let actual_stepover = y_range / num_passes as f64;
+
+        // Zigzag pattern
+        for i in 0..=num_passes {
+            let y = min_y + i as f64 * actual_stepover;
+
+            // Alternate X direction for zigzag
+            if i % 2 == 0 {
+                // Left to right
+                if i == 0 {
+                    self.output.emit(&format!("G01 X{:.4} Y{:.4} F{:.1}", min_x, y, feed_rate));
+                } else {
+                    self.output.emit(&format!("G01 Y{:.4} F{:.1}", y, feed_rate));
+                }
+                self.output.emit(&format!("G01 X{:.4} F{:.1}", max_x, feed_rate));
+            } else {
+                // Right to left
+                self.output.emit(&format!("G01 Y{:.4} F{:.1}", y, feed_rate));
+                self.output.emit(&format!("G01 X{:.4} F{:.1}", min_x, feed_rate));
+            }
+        }
+    }
+
+    /// Generate spiral pocket for circular pockets
+    #[allow(clippy::too_many_arguments)]
+    fn generate_circular_pocket(
+        &mut self,
+        center_x: f64, center_y: f64,
+        diameter: f64,
+        depth: f64,
+        tool_dia: f64, stepover: f64, feed_rate: f64
+    ) {
+        // Calculate pocket radius (leave tool radius on edge)
+        let pocket_radius = diameter / 2.0 - tool_dia / 2.0;
+
+        if pocket_radius <= 0.0 {
+            // Tool is too big for pocket, just do a center drill
+            self.output.emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
+            self.output.emit(&format!("G01 Z-{:.4} F{:.1}", depth, feed_rate * 0.3));
+            return;
+        }
+
+        // Calculate number of spiral passes
+        let num_passes = (pocket_radius / stepover).ceil() as i32;
+
+        // Rapid to center
+        self.output.emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
+
+        // Plunge to depth
+        self.output.emit(&format!("G01 Z-{:.4} F{:.1}", depth, feed_rate * 0.3));
+
+        // Spiral outward
+        let points_per_rev = 36; // 10-degree increments
+        for i in 0..=(num_passes * points_per_rev) {
+            let angle = 2.0 * std::f64::consts::PI * (i as f64 / points_per_rev as f64);
+            let radius = stepover * (i as f64 / points_per_rev as f64);
+            let r = radius.min(pocket_radius);
+
+            let x = center_x + r * angle.cos();
+            let y = center_y + r * angle.sin();
+
+            self.output.emit(&format!("G01 X{:.4} Y{:.4} F{:.1}", x, y, feed_rate));
+
+            // Stop once we reach full radius
+            if r >= pocket_radius {
+                break;
+            }
+        }
+
+        // Finish with full circle at outer radius to clean up
+        self.output.emit_comment("Finish pass");
+        for i in 0..=points_per_rev {
+            let angle = 2.0 * std::f64::consts::PI * (i as f64 / points_per_rev as f64);
+            let x = center_x + pocket_radius * angle.cos();
+            let y = center_y + pocket_radius * angle.sin();
+            self.output.emit(&format!("G01 X{:.4} Y{:.4} F{:.1}", x, y, feed_rate));
+        }
     }
 
     fn emit_tool_change(&mut self, tc: &ToolChange) {
