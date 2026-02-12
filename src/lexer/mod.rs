@@ -214,7 +214,6 @@ pub enum Token {
     // Semicolon used for comments, not as a token
     // #[token(";")]
     // Semicolon,
-
     #[token("=")]
     Equals,
 
@@ -345,43 +344,46 @@ mod tests {
     fn test_basic_tokens() {
         let input = "drill at x 10 y 20 depth 5";
         let tokens: Vec<_> = lex(input).into_iter().map(|(t, _)| t).collect();
-        
-        assert_eq!(tokens, vec![
-            Token::Drill,
-            Token::At,
-            Token::X,
-            Token::Number(Some(10.0)),
-            Token::Y,
-            Token::Number(Some(20.0)),
-            Token::Depth,
-            Token::Number(Some(5.0)),
-        ]);
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Drill,
+                Token::At,
+                Token::X,
+                Token::Number(Some(10.0)),
+                Token::Y,
+                Token::Number(Some(20.0)),
+                Token::Depth,
+                Token::Number(Some(5.0)),
+            ]
+        );
     }
 
     #[test]
     fn test_tool_definition() {
         let input = "tool 1 dia 6 length 50";
         let tokens: Vec<_> = lex(input).into_iter().map(|(t, _)| t).collect();
-        
-        assert_eq!(tokens, vec![
-            Token::Tool,
-            Token::Number(Some(1.0)),
-            Token::Diameter,
-            Token::Number(Some(6.0)),
-            Token::Length,
-            Token::Number(Some(50.0)),
-        ]);
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Tool,
+                Token::Number(Some(1.0)),
+                Token::Diameter,
+                Token::Number(Some(6.0)),
+                Token::Length,
+                Token::Number(Some(50.0)),
+            ]
+        );
     }
 
     #[test]
     fn test_units() {
         let input = "units imperial";
         let tokens: Vec<_> = lex(input).into_iter().map(|(t, _)| t).collect();
-        
+
         println!("Tokens: {:?}", tokens);
-        assert_eq!(tokens, vec![
-            Token::Units,
-            Token::Imperial,
-        ]);
+        assert_eq!(tokens, vec![Token::Units, Token::Imperial,]);
     }
 }

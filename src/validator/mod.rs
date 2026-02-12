@@ -50,7 +50,10 @@ impl Validator {
         }
     }
 
-    pub fn validate_program(&self, program: &crate::ast::Program) -> Result<(), Vec<ValidationError>> {
+    pub fn validate_program(
+        &self,
+        program: &crate::ast::Program,
+    ) -> Result<(), Vec<ValidationError>> {
         let mut errors = Vec::new();
 
         for op in &program.operations {
@@ -74,7 +77,10 @@ impl Validator {
                 if let Some(data) = &tc.tool_data {
                     if data.diameter <= 0.0 {
                         return Err(ValidationError::Geometry {
-                            message: format!("tool {} has invalid diameter {}", tc.tool_number, data.diameter),
+                            message: format!(
+                                "tool {} has invalid diameter {}",
+                                tc.tool_number, data.diameter
+                            ),
                         });
                     }
                 }
@@ -172,7 +178,10 @@ impl Validator {
             Geometry::Rect(r) => {
                 if r.width <= 0.0 || r.height <= 0.0 {
                     return Err(ValidationError::Geometry {
-                        message: format!("rectangle has invalid dimensions {}x{}", r.width, r.height),
+                        message: format!(
+                            "rectangle has invalid dimensions {}x{}",
+                            r.width, r.height
+                        ),
                     });
                 }
                 Ok(())

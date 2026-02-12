@@ -2,7 +2,7 @@
 //! Converts AST into validated G-code output
 
 use crate::ast::*;
-use crate::black_book::{BlackBook, ToolGeometry, Engagement};
+use crate::black_book::{BlackBook, Engagement, ToolGeometry};
 
 #[derive(Debug)]
 pub struct GCodeOutput {
@@ -21,7 +21,8 @@ impl GCodeOutput {
     }
 
     pub fn emit(&mut self, code: &str) {
-        self.lines.push(format!("N{:04} {}", self.line_number, code));
+        self.lines
+            .push(format!("N{:04} {}", self.line_number, code));
         self.line_number += self.step;
     }
 
@@ -102,12 +103,17 @@ impl CodeGenerator {
         let material = self.current_material.as_ref().unwrap();
         let tool = self.current_tool_data.as_ref().unwrap();
 
-        self.output.emit_comment("================================================");
-        self.output.emit_comment("CUTTING PARAMETERS SUMMARY - SANITY CHECK THIS!");
-        self.output.emit_comment("================================================");
+        self.output
+            .emit_comment("================================================");
+        self.output
+            .emit_comment("CUTTING PARAMETERS SUMMARY - SANITY CHECK THIS!");
+        self.output
+            .emit_comment("================================================");
         self.output.emit_comment(&format!("Material: {}", material));
-        self.output.emit_comment(&format!("Tool: {} dia, {} flutes, {:?}",
-            tool.diameter, tool.flutes, tool.material));
+        self.output.emit_comment(&format!(
+            "Tool: {} dia, {} flutes, {:?}",
+            tool.diameter, tool.flutes, tool.material
+        ));
 
         // Get cutting parameters from Black Book
         let bb_tool = crate::black_book::ToolGeometry {
@@ -131,10 +137,14 @@ impl CodeGenerator {
 
         if let Ok(params) = self.black_book.calculate(material, &bb_tool, &engagement) {
             self.output.emit_comment(&format!("RPM: {:.0}", params.rpm));
-            self.output.emit_comment(&format!("Feed Rate: {:.1} IPM", params.feed_rate_ipm));
-            self.output.emit_comment(&format!("Max DOC (stepdown): {:.3}", tool.diameter * 0.8));
-            self.output.emit_comment(&format!("Max WOC (stepover): {:.3}", tool.diameter * 0.4));
-            self.output.emit_comment(&format!("Chip Load: {:.4} IPT", params.chip_load_ipt));
+            self.output
+                .emit_comment(&format!("Feed Rate: {:.1} IPM", params.feed_rate_ipm));
+            self.output
+                .emit_comment(&format!("Max DOC (stepdown): {:.3}", tool.diameter * 0.8));
+            self.output
+                .emit_comment(&format!("Max WOC (stepover): {:.3}", tool.diameter * 0.4));
+            self.output
+                .emit_comment(&format!("Chip Load: {:.4} IPT", params.chip_load_ipt));
 
             // Add any warnings
             if !params.warnings.is_empty() {
@@ -145,7 +155,8 @@ impl CodeGenerator {
             }
         }
 
-        self.output.emit_comment("================================================");
+        self.output
+            .emit_comment("================================================");
     }
 
     fn emit_header(&mut self, header: &Header) {
@@ -159,7 +170,7 @@ impl CodeGenerator {
 
         // Units
         match header.units {
-            Units::Metric => self.output.emit("G21"), // Metric
+            Units::Metric => self.output.emit("G21"),   // Metric
             Units::Imperial => self.output.emit("G20"), // Imperial
         }
 
@@ -193,7 +204,10 @@ impl CodeGenerator {
             Operation::FaceV2(f) => self.emit_face_v2(f),
             Operation::StockDef(s) => {
                 self.stock = Some(s.clone());
-                self.output.emit_comment(&format!("STOCK: {} x {} x {} {}", s.size_x, s.size_y, s.size_z, s.material));
+                self.output.emit_comment(&format!(
+                    "STOCK: {} x {} x {} {}",
+                    s.size_x, s.size_y, s.size_z, s.material
+                ));
             }
             Operation::Tap(t) => self.emit_tap(t),
             Operation::Comment(c) => self.output.emit_comment(c),
@@ -246,9 +260,13 @@ impl CodeGenerator {
                     flute_count: tool_data.flutes,
                     tool_material: match tool_data.material {
                         crate::ast::ToolMaterial::HSS => crate::black_book::ToolMaterial::HSS,
-                        crate::ast::ToolMaterial::Carbide => crate::black_book::ToolMaterial::Carbide,
+                        crate::ast::ToolMaterial::Carbide => {
+                            crate::black_book::ToolMaterial::Carbide
+                        }
                         crate::ast::ToolMaterial::Cobalt => crate::black_book::ToolMaterial::Cobalt,
-                        crate::ast::ToolMaterial::Ceramic => crate::black_book::ToolMaterial::Ceramic,
+                        crate::ast::ToolMaterial::Ceramic => {
+                            crate::black_book::ToolMaterial::Ceramic
+                        }
                     },
                     corner_radius: None,
                     coating: None,
@@ -268,7 +286,8 @@ impl CodeGenerator {
                         depth // No peck for shallow holes
                     };
 
-                    let (rpm, feed) = self.apply_rpm_limit(params.rpm as f64, params.feed_rate_ipm * 0.7);
+                    let (rpm, feed) =
+                        self.apply_rpm_limit(params.rpm as f64, params.feed_rate_ipm * 0.7);
                     return (rpm, feed, peck_depth);
                 }
             }
@@ -288,9 +307,13 @@ impl CodeGenerator {
                     flute_count: tool_data.flutes,
                     tool_material: match tool_data.material {
                         crate::ast::ToolMaterial::HSS => crate::black_book::ToolMaterial::HSS,
-                        crate::ast::ToolMaterial::Carbide => crate::black_book::ToolMaterial::Carbide,
+                        crate::ast::ToolMaterial::Carbide => {
+                            crate::black_book::ToolMaterial::Carbide
+                        }
                         crate::ast::ToolMaterial::Cobalt => crate::black_book::ToolMaterial::Cobalt,
-                        crate::ast::ToolMaterial::Ceramic => crate::black_book::ToolMaterial::Ceramic,
+                        crate::ast::ToolMaterial::Ceramic => {
+                            crate::black_book::ToolMaterial::Ceramic
+                        }
                     },
                     corner_radius: None,
                     coating: None,
@@ -327,12 +350,15 @@ impl CodeGenerator {
         ));
 
         // Get tool diameter
-        let tool_dia = self.current_tool_data.as_ref()
+        let tool_dia = self
+            .current_tool_data
+            .as_ref()
             .map(|t| t.diameter)
             .unwrap_or(0.25);
 
         // Calculate cutting parameters from Black Book
-        let (rpm, feed_rate, stepdown, _stepover) = self.calculate_pocket_params(tool_dia, cut.height);
+        let (rpm, feed_rate, stepdown, _stepover) =
+            self.calculate_pocket_params(tool_dia, cut.height);
 
         // Calculate number of Z passes for the height
         let num_passes = (cut.height / stepdown).ceil() as i32;
@@ -401,21 +427,22 @@ impl CodeGenerator {
             ));
         } else {
             // Standard drill cycle
-            self.output.emit(&format!(
-                "G81 R0.1 Z-{:.4} F{:.1}",
-                depth, feed_rate
-            ));
+            self.output
+                .emit(&format!("G81 R0.1 Z-{:.4} F{:.1}", depth, feed_rate));
         }
     }
 
     fn emit_pocket_v2(&mut self, pocket: &PocketV2Op) {
         // Get tool diameter (from current tool or default)
-        let tool_dia = self.current_tool_data.as_ref()
+        let tool_dia = self
+            .current_tool_data
+            .as_ref()
             .map(|t| t.diameter)
             .unwrap_or(0.25); // Default 1/4" end mill
 
         // Calculate cutting parameters from Black Book
-        let (rpm, feed_rate, stepdown, stepover) = self.calculate_pocket_params(tool_dia, pocket.depth);
+        let (rpm, feed_rate, stepdown, stepover) =
+            self.calculate_pocket_params(tool_dia, pocket.depth);
 
         // Calculate number of passes
         let num_passes = (pocket.depth / stepdown).ceil() as i32;
@@ -460,21 +487,33 @@ impl CodeGenerator {
         // Generate passes
         for pass_num in 1..=num_passes {
             let z_depth = (pass_num as f64 * stepdown).min(pocket.depth);
-            self.output.emit_comment(&format!("Pass {}/{}: Z={:.3}", pass_num, num_passes, -z_depth));
+            self.output.emit_comment(&format!(
+                "Pass {}/{}: Z={:.3}",
+                pass_num, num_passes, -z_depth
+            ));
 
             match &pocket.shape {
                 PocketShape::Rect { width, height } => {
                     self.generate_rectangular_pocket(
-                        pocket.position.x, pocket.position.y,
-                        *width, *height, z_depth,
-                        tool_dia, stepover, feed_rate
+                        pocket.position.x,
+                        pocket.position.y,
+                        *width,
+                        *height,
+                        z_depth,
+                        tool_dia,
+                        stepover,
+                        feed_rate,
                     );
                 }
                 PocketShape::Circle { diameter } => {
                     self.generate_circular_pocket(
-                        pocket.position.x, pocket.position.y,
-                        *diameter, z_depth,
-                        tool_dia, stepover, feed_rate
+                        pocket.position.x,
+                        pocket.position.y,
+                        *diameter,
+                        z_depth,
+                        tool_dia,
+                        stepover,
+                        feed_rate,
                     );
                 }
             }
@@ -488,10 +527,14 @@ impl CodeGenerator {
     #[allow(clippy::too_many_arguments)]
     fn generate_rectangular_pocket(
         &mut self,
-        center_x: f64, center_y: f64,
-        width: f64, height: f64,
+        center_x: f64,
+        center_y: f64,
+        width: f64,
+        height: f64,
         depth: f64,
-        tool_dia: f64, stepover: f64, feed_rate: f64
+        tool_dia: f64,
+        stepover: f64,
+        feed_rate: f64,
     ) {
         // Calculate pocket bounds (leave stock for finish if needed)
         let half_width = width / 2.0 - tool_dia / 2.0;
@@ -502,10 +545,12 @@ impl CodeGenerator {
         let max_y = center_y + half_height;
 
         // Rapid to start position (center of pocket)
-        self.output.emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
+        self.output
+            .emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
 
         // Plunge to depth
-        self.output.emit(&format!("G01 Z-{:.4} F{:.1}", depth, feed_rate * 0.3));
+        self.output
+            .emit(&format!("G01 Z-{:.4} F{:.1}", depth, feed_rate * 0.3));
 
         // Calculate number of Y steps
         let y_range = max_y - min_y;
@@ -520,15 +565,20 @@ impl CodeGenerator {
             if i % 2 == 0 {
                 // Left to right
                 if i == 0 {
-                    self.output.emit(&format!("G01 X{:.4} Y{:.4} F{:.1}", min_x, y, feed_rate));
+                    self.output
+                        .emit(&format!("G01 X{:.4} Y{:.4} F{:.1}", min_x, y, feed_rate));
                 } else {
-                    self.output.emit(&format!("G01 Y{:.4} F{:.1}", y, feed_rate));
+                    self.output
+                        .emit(&format!("G01 Y{:.4} F{:.1}", y, feed_rate));
                 }
-                self.output.emit(&format!("G01 X{:.4} F{:.1}", max_x, feed_rate));
+                self.output
+                    .emit(&format!("G01 X{:.4} F{:.1}", max_x, feed_rate));
             } else {
                 // Right to left
-                self.output.emit(&format!("G01 Y{:.4} F{:.1}", y, feed_rate));
-                self.output.emit(&format!("G01 X{:.4} F{:.1}", min_x, feed_rate));
+                self.output
+                    .emit(&format!("G01 Y{:.4} F{:.1}", y, feed_rate));
+                self.output
+                    .emit(&format!("G01 X{:.4} F{:.1}", min_x, feed_rate));
             }
         }
     }
@@ -537,18 +587,23 @@ impl CodeGenerator {
     #[allow(clippy::too_many_arguments)]
     fn generate_circular_pocket(
         &mut self,
-        center_x: f64, center_y: f64,
+        center_x: f64,
+        center_y: f64,
         diameter: f64,
         depth: f64,
-        tool_dia: f64, stepover: f64, feed_rate: f64
+        tool_dia: f64,
+        stepover: f64,
+        feed_rate: f64,
     ) {
         // Calculate pocket radius (leave tool radius on edge)
         let pocket_radius = diameter / 2.0 - tool_dia / 2.0;
 
         if pocket_radius <= 0.0 {
             // Tool is too big for pocket, just do a center drill
-            self.output.emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
-            self.output.emit(&format!("G01 Z-{:.4} F{:.1}", depth, feed_rate * 0.3));
+            self.output
+                .emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
+            self.output
+                .emit(&format!("G01 Z-{:.4} F{:.1}", depth, feed_rate * 0.3));
             return;
         }
 
@@ -556,10 +611,12 @@ impl CodeGenerator {
         let num_passes = (pocket_radius / stepover).ceil() as i32;
 
         // Rapid to center
-        self.output.emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
+        self.output
+            .emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
 
         // Plunge to depth
-        self.output.emit(&format!("G01 Z-{:.4} F{:.1}", depth, feed_rate * 0.3));
+        self.output
+            .emit(&format!("G01 Z-{:.4} F{:.1}", depth, feed_rate * 0.3));
 
         // Spiral outward
         let points_per_rev = 36; // 10-degree increments
@@ -571,7 +628,8 @@ impl CodeGenerator {
             let x = center_x + r * angle.cos();
             let y = center_y + r * angle.sin();
 
-            self.output.emit(&format!("G01 X{:.4} Y{:.4} F{:.1}", x, y, feed_rate));
+            self.output
+                .emit(&format!("G01 X{:.4} Y{:.4} F{:.1}", x, y, feed_rate));
 
             // Stop once we reach full radius
             if r >= pocket_radius {
@@ -585,12 +643,14 @@ impl CodeGenerator {
             let angle = 2.0 * std::f64::consts::PI * (i as f64 / points_per_rev as f64);
             let x = center_x + pocket_radius * angle.cos();
             let y = center_y + pocket_radius * angle.sin();
-            self.output.emit(&format!("G01 X{:.4} Y{:.4} F{:.1}", x, y, feed_rate));
+            self.output
+                .emit(&format!("G01 X{:.4} Y{:.4} F{:.1}", x, y, feed_rate));
         }
     }
 
     fn emit_tool_change(&mut self, tc: &ToolChange) {
-        self.output.emit_comment(&format!("TOOL CHANGE - T{}", tc.tool_number));
+        self.output
+            .emit_comment(&format!("TOOL CHANGE - T{}", tc.tool_number));
 
         // Spindle off, coolant off for tool change
         self.output.emit("M05");
@@ -636,7 +696,8 @@ impl CodeGenerator {
 
         for (i, pos) in d.positions.iter().enumerate() {
             // Rapid to position
-            self.output.emit(&format!("G00 X{:.3} Y{:.3}", pos.x, pos.y));
+            self.output
+                .emit(&format!("G00 X{:.3} Y{:.3}", pos.x, pos.y));
 
             if i == 0 {
                 // First hole: set up canned cycle
@@ -705,15 +766,19 @@ impl CodeGenerator {
         for depth_pass in 1..=num_depth_passes {
             let current_z = -(depth_pass as f64 * p.stepdown).min(p.depth);
 
-            self.output.emit_comment(&format!("DEPTH PASS {} Z={:.3}", depth_pass, current_z));
+            self.output
+                .emit_comment(&format!("DEPTH PASS {} Z={:.3}", depth_pass, current_z));
 
             // Plunge to depth
-            self.output.emit(&format!("G01 Z{:.3} F{:.1}", current_z, p.plunge_feed));
+            self.output
+                .emit(&format!("G01 Z{:.3} F{:.1}", current_z, p.plunge_feed));
 
             // Zigzag pattern
             for i in 0..=num_passes {
                 let y = min_y + i as f64 * stepover_dist;
-                if y > max_y { break; }
+                if y > max_y {
+                    break;
+                }
 
                 let x_start = if i % 2 == 0 { min_x } else { max_x };
                 let x_end = if i % 2 == 0 { max_x } else { min_x };
@@ -722,7 +787,8 @@ impl CodeGenerator {
                 self.output.emit(&format!("G00 X{:.3} Y{:.3}", x_start, y));
 
                 // Cut across
-                self.output.emit(&format!("G01 X{:.3} F{:.1}", x_end, p.feed_rate));
+                self.output
+                    .emit(&format!("G01 X{:.3} F{:.1}", x_end, p.feed_rate));
             }
         }
 
@@ -731,14 +797,16 @@ impl CodeGenerator {
             self.output.emit_comment("FINISH PASS");
             // Simple finish: traverse perimeter
             let finish_z = -p.depth;
-            self.output.emit(&format!("G01 Z{:.3} F{:.1}", finish_z, p.plunge_feed));
+            self.output
+                .emit(&format!("G01 Z{:.3} F{:.1}", finish_z, p.plunge_feed));
 
             let fx = rect.bottom_left.x + allowance;
             let fy = rect.bottom_left.y + allowance;
             let fw = rect.width - allowance * 2.0;
             let fh = rect.height - allowance * 2.0;
 
-            self.output.emit(&format!("G01 X{:.3} Y{:.3} F{:.1}", fx, fy, p.feed_rate));
+            self.output
+                .emit(&format!("G01 X{:.3} Y{:.3} F{:.1}", fx, fy, p.feed_rate));
             self.output.emit(&format!("G01 X{:.3}", fx + fw));
             self.output.emit(&format!("G01 Y{:.3}", fy + fh));
             self.output.emit(&format!("G01 X{:.3}", fx));
@@ -760,20 +828,24 @@ impl CodeGenerator {
         for depth_pass in 1..=num_depth_passes {
             let current_z = -(depth_pass as f64 * p.stepdown).min(p.depth);
 
-            self.output.emit_comment(&format!("CIRCULAR POCKET DEPTH {}", depth_pass));
+            self.output
+                .emit_comment(&format!("CIRCULAR POCKET DEPTH {}", depth_pass));
 
             // Spiral from center outward
             let num_spiral_passes = (radius / (tool_radius * 2.0 * p.stepover)).ceil() as i32;
 
             // Start at center
-            self.output.emit(&format!("G00 X{:.3} Y{:.3}", circ.center.x, circ.center.y));
-            self.output.emit(&format!("G01 Z{:.3} F{:.1}", current_z, p.plunge_feed));
+            self.output
+                .emit(&format!("G00 X{:.3} Y{:.3}", circ.center.x, circ.center.y));
+            self.output
+                .emit(&format!("G01 Z{:.3} F{:.1}", current_z, p.plunge_feed));
 
             for spiral in 1..=num_spiral_passes {
                 let r = spiral as f64 * (radius / num_spiral_passes as f64);
 
                 // Arc around (simplified: just move to radius and do circle)
-                self.output.emit(&format!("G03 X{:.3} Y{:.3} I{:.3} J{:.3} F{:.1}",
+                self.output.emit(&format!(
+                    "G03 X{:.3} Y{:.3} I{:.3} J{:.3} F{:.1}",
                     circ.center.x + r,
                     circ.center.y,
                     -r,
@@ -822,9 +894,11 @@ impl CodeGenerator {
             let z = -(pass as f64 * 5.0).min(p.depth);
 
             self.output.emit(&format!("G00 X{:.3} Y{:.3}", x, y));
-            self.output.emit(&format!("G01 Z{:.3} F{:.1}", z, p.plunge_feed));
+            self.output
+                .emit(&format!("G01 Z{:.3} F{:.1}", z, p.plunge_feed));
 
-            self.output.emit(&format!("G01 X{:.3} F{:.1}", x + w, p.feed_rate));
+            self.output
+                .emit(&format!("G01 X{:.3} F{:.1}", x + w, p.feed_rate));
             self.output.emit(&format!("G01 Y{:.3}", y + h));
             self.output.emit(&format!("G01 X{:.3}", x));
             self.output.emit(&format!("G01 Y{:.3}", y));
@@ -841,12 +915,20 @@ impl CodeGenerator {
         for pass in 1..=num_depth_passes {
             let z = -(pass as f64 * 5.0).min(p.depth);
 
-            self.output.emit(&format!("G00 X{:.3} Y{:.3}", cx + radius, cy));
-            self.output.emit(&format!("G01 Z{:.3} F{:.1}", z, p.plunge_feed));
+            self.output
+                .emit(&format!("G00 X{:.3} Y{:.3}", cx + radius, cy));
+            self.output
+                .emit(&format!("G01 Z{:.3} F{:.1}", z, p.plunge_feed));
 
             // Full circle using G02/G03
-            self.output.emit(&format!("G03 X{:.3} Y{:.3} I{:.3} J{:.3} F{:.1}",
-                cx + radius, cy, -radius, 0.0, p.feed_rate));
+            self.output.emit(&format!(
+                "G03 X{:.3} Y{:.3} I{:.3} J{:.3} F{:.1}",
+                cx + radius,
+                cy,
+                -radius,
+                0.0,
+                p.feed_rate
+            ));
         }
     }
 
@@ -863,37 +945,53 @@ impl CodeGenerator {
 
         let num_passes = ((max_y - min_y) / stepover_dist).ceil() as i32;
 
-        self.output.emit(&format!("G00 X{:.3} Y{:.3}", min_x - tool_radius, min_y));
+        self.output
+            .emit(&format!("G00 X{:.3} Y{:.3}", min_x - tool_radius, min_y));
         self.output.emit(&format!("G01 Z{:.3} F200.0", -f.depth));
 
         for i in 0..num_passes {
             let y = min_y + i as f64 * stepover_dist;
-            let x_start = if i % 2 == 0 { min_x - tool_radius } else { max_x + tool_radius };
-            let x_end = if i % 2 == 0 { max_x + tool_radius } else { min_x - tool_radius };
+            let x_start = if i % 2 == 0 {
+                min_x - tool_radius
+            } else {
+                max_x + tool_radius
+            };
+            let x_end = if i % 2 == 0 {
+                max_x + tool_radius
+            } else {
+                min_x - tool_radius
+            };
 
             self.output.emit(&format!("G00 X{:.3} Y{:.3}", x_start, y));
-            self.output.emit(&format!("G01 X{:.3} F{:.1}", x_end, f.feed_rate));
+            self.output
+                .emit(&format!("G01 X{:.3} F{:.1}", x_end, f.feed_rate));
         }
 
         self.output.emit("G00 Z50.0");
     }
 
     fn emit_face_v2(&mut self, f: &FaceV2Op) {
-        self.output.emit_comment(&format!("FACE MILLING - depth: {:.3}", f.depth));
+        self.output
+            .emit_comment(&format!("FACE MILLING - depth: {:.3}", f.depth));
 
         // Get tool and calculate parameters
-        let tool_dia = self.current_tool_data.as_ref()
+        let tool_dia = self
+            .current_tool_data
+            .as_ref()
             .map(|t| t.diameter)
             .unwrap_or(1.0); // Default 1" face mill
 
         let (rpm, feed_rate, _stepdown, stepover) = self.calculate_pocket_params(tool_dia, f.depth);
 
         // Get stock dimensions from stock definition or use defaults
-        let (stock_width, stock_height) = self.stock.as_ref()
+        let (stock_width, stock_height) = self
+            .stock
+            .as_ref()
             .map(|s| (s.size_x, s.size_y))
             .unwrap_or((3.0, 2.0)); // Default 3x2 if no stock specified
 
-        self.output.emit_comment(&format!("Stock size: {} x {}", stock_width, stock_height));
+        self.output
+            .emit_comment(&format!("Stock size: {} x {}", stock_width, stock_height));
 
         // Calculate facing passes
         let num_passes = (stock_height / stepover).ceil() as i32;
@@ -910,8 +1008,10 @@ impl CodeGenerator {
         let max_x = stock_width + 0.1;
         let min_y = -stepover; // Start with overlap
 
-        self.output.emit(&format!("G00 X{:.3} Y{:.3}", min_x, min_y));
-        self.output.emit(&format!("G01 Z-{:.3} F{:.1}", f.depth, feed_rate * 0.5));
+        self.output
+            .emit(&format!("G00 X{:.3} Y{:.3}", min_x, min_y));
+        self.output
+            .emit(&format!("G01 Z-{:.3} F{:.1}", f.depth, feed_rate * 0.5));
 
         for i in 0..num_passes {
             let y = min_y + i as f64 * stepover;
@@ -919,7 +1019,8 @@ impl CodeGenerator {
             let x_end = if i % 2 == 0 { max_x } else { min_x };
 
             self.output.emit(&format!("G00 Y{:.3}", y));
-            self.output.emit(&format!("G01 X{:.3} F{:.1}", x_end, feed_rate));
+            self.output
+                .emit(&format!("G01 X{:.3} F{:.1}", x_end, feed_rate));
         }
 
         self.output.emit("G00 Z0.1");
@@ -932,7 +1033,8 @@ impl CodeGenerator {
         self.output.emit(&format!("G00 Z{:.3}", t.retract_height));
 
         for (i, pos) in t.positions.iter().enumerate() {
-            self.output.emit(&format!("G00 X{:.3} Y{:.3}", pos.x, pos.y));
+            self.output
+                .emit(&format!("G00 X{:.3} Y{:.3}", pos.x, pos.y));
 
             if i == 0 {
                 // G84 tapping cycle
@@ -955,8 +1057,12 @@ impl CodeGenerator {
         self.output.emit_comment("PROGRAM END");
 
         // Return to safe position
-        self.output.emit(&format!("G00 Z{:.3}", footer.return_to.x.max(50.0)));
-        self.output.emit(&format!("G00 X{:.3} Y{:.3}", footer.return_to.x, footer.return_to.y));
+        self.output
+            .emit(&format!("G00 Z{:.3}", footer.return_to.x.max(50.0)));
+        self.output.emit(&format!(
+            "G00 X{:.3} Y{:.3}",
+            footer.return_to.x, footer.return_to.y
+        ));
 
         // Spindle and coolant off
         self.output.emit("M05");
@@ -1139,7 +1245,10 @@ mod tests {
 
         // Rectangular pocket operation
         let pocket = PocketV2Op {
-            shape: PocketShape::Rect { width: 2.0, height: 1.5 },
+            shape: PocketShape::Rect {
+                width: 2.0,
+                height: 1.5,
+            },
             position: Position::new(1.0, 0.75),
             depth: 0.25,
         };
@@ -1253,7 +1362,10 @@ mod tests {
 
         // Deep pocket that requires multiple passes
         let pocket = PocketV2Op {
-            shape: PocketShape::Rect { width: 1.0, height: 0.75 },
+            shape: PocketShape::Rect {
+                width: 1.0,
+                height: 0.75,
+            },
             position: Position::new(0.5, 0.375),
             depth: 0.5, // Deep pocket
         };

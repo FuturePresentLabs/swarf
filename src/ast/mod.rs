@@ -23,13 +23,18 @@ pub struct Footer {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Units {
-    Metric,    // G21
-    Imperial,  // G20
+    Metric,   // G21
+    Imperial, // G20
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WorkOffset {
-    G54, G55, G56, G57, G58, G59,
+    G54,
+    G55,
+    G56,
+    G57,
+    G58,
+    G59,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,10 +46,10 @@ pub struct SafetyConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CoolantMode {
-    Off,      // M09
-    Flood,    // M08
-    Mist,     // M07
-    Through,  // M51 (high pressure through-spindle)
+    Off,     // M09
+    Flood,   // M08
+    Mist,    // M07
+    Through, // M51 (high pressure through-spindle)
 }
 
 /// Top-level machining operations
@@ -99,9 +104,9 @@ pub struct SpindleCommand {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SpindleDir {
-    CW,   // M03
-    CCW,  // M04
-    Off,  // M05
+    CW,  // M03
+    CCW, // M04
+    Off, // M05
 }
 
 /// Drill operation - supports patterns
@@ -225,13 +230,13 @@ pub struct Point3D {
 pub struct PartDef {
     pub name: String,
     pub stock: Option<StockDef>,
-    pub existing: bool,  // true = modifying existing part, false = from stock
+    pub existing: bool, // true = modifying existing part, false = from stock
 }
 
 /// Stock definition
 #[derive(Debug, Clone, PartialEq)]
 pub struct StockDef {
-    pub material: String,  // e.g., "6061-T6", "1018"
+    pub material: String, // e.g., "6061-T6", "1018"
     pub size_x: f64,
     pub size_y: f64,
     pub size_z: f64,
@@ -242,8 +247,8 @@ pub struct StockDef {
 pub struct SetupBlock {
     pub zero: ZeroConfig,
     pub material: Option<String>, // Material grade for Black Book lookup
-    pub z_min: Option<f64>,      // Hard Z floor - do not go below
-    pub y_limit: Option<f64>,    // Y travel limit (negative = behind tool)
+    pub z_min: Option<f64>,       // Hard Z floor - do not go below
+    pub y_limit: Option<f64>,     // Y travel limit (negative = behind tool)
 }
 
 /// Zero/origin configuration
@@ -292,19 +297,19 @@ pub enum Direction {
 /// Z constraint for operations
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ZConstraint {
-    Positive,   // Z+ - only climb, no plunge below Z0
-    Negative,   // Z- - only plunge
-    Free,       // No constraint
-    Min(f64),   // Hard floor at Z value
+    Positive, // Z+ - only climb, no plunge below Z0
+    Negative, // Z- - only plunge
+    Free,     // No constraint
+    Min(f64), // Hard floor at Z value
 }
 
 /// Cut operation - new simplified syntax
 #[derive(Debug, Clone, PartialEq)]
 pub struct CutOp {
     pub direction: Direction,
-    pub sweep: f64,        // Width of cut pattern
-    pub depth: f64,        // Distance into material
-    pub height: f64,       // Z height of feature (for stepdown calc)
+    pub sweep: f64,  // Width of cut pattern
+    pub depth: f64,  // Distance into material
+    pub height: f64, // Z height of feature (for stepdown calc)
     pub z_constraint: ZConstraint,
 }
 
@@ -323,7 +328,7 @@ pub struct ClearOp {
 pub struct DrillV2Op {
     pub diameter: f64,
     pub position: Position,
-    pub depth: DrillDepth,  // Thru or specific depth
+    pub depth: DrillDepth, // Thru or specific depth
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -349,12 +354,12 @@ pub enum PocketShape {
 /// Face operation - v2 simplified syntax
 #[derive(Debug, Clone, PartialEq)]
 pub struct FaceV2Op {
-    pub position: FacePosition,  // stock, at X Y, or just use work area
-    pub depth: f64,              // how much to face off
+    pub position: FacePosition, // stock, at X Y, or just use work area
+    pub depth: f64,             // how much to face off
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FacePosition {
-    Stock,           // Face entire stock area
-    At(f64, f64),    // Face centered at X, Y
+    Stock,        // Face entire stock area
+    At(f64, f64), // Face centered at X, Y
 }

@@ -3,7 +3,7 @@
 //! Mach3 has limited canned cycle support. We'll convert G83/G81 to long-form G-code.
 
 use crate::codegen::GCodeOutput;
-use crate::post::{PostProcessor, g83_to_long_form, g81_to_long_form, g82_to_long_form};
+use crate::post::{g81_to_long_form, g82_to_long_form, g83_to_long_form, PostProcessor};
 
 pub struct Mach3Post;
 
@@ -19,7 +19,10 @@ impl PostProcessor for Mach3Post {
 
             // Skip line numbers for processing
             let code = if trimmed.starts_with("N") {
-                trimmed.split_once(' ').map(|(_, rest)| rest).unwrap_or(trimmed)
+                trimmed
+                    .split_once(' ')
+                    .map(|(_, rest)| rest)
+                    .unwrap_or(trimmed)
             } else {
                 trimmed
             };
@@ -28,15 +31,19 @@ impl PostProcessor for Mach3Post {
             if code.contains("G00") || code.contains("G01") {
                 // Extract X and Y coordinates
                 if let Some(x_pos) = code.find('X') {
-                    if let Some(end) = code[x_pos+1..].find(|c: char| c.is_whitespace() || c == 'Y' || c == 'Z') {
-                        if let Ok(x) = code[x_pos+1..x_pos+1+end].parse::<f64>() {
+                    if let Some(end) =
+                        code[x_pos + 1..].find(|c: char| c.is_whitespace() || c == 'Y' || c == 'Z')
+                    {
+                        if let Ok(x) = code[x_pos + 1..x_pos + 1 + end].parse::<f64>() {
                             last_x = x;
                         }
                     }
                 }
                 if let Some(y_pos) = code.find('Y') {
-                    if let Some(end) = code[y_pos+1..].find(|c: char| c.is_whitespace() || c == 'Z') {
-                        if let Ok(y) = code[y_pos+1..y_pos+1+end].parse::<f64>() {
+                    if let Some(end) =
+                        code[y_pos + 1..].find(|c: char| c.is_whitespace() || c == 'Z')
+                    {
+                        if let Ok(y) = code[y_pos + 1..y_pos + 1 + end].parse::<f64>() {
                             last_y = y;
                         }
                     }
@@ -104,18 +111,18 @@ impl PostProcessor for Mach3Post {
                 }
                 continue;
             }
-            
+
             // Check for feed rate
             if let Some(f) = extract_param(code, 'F') {
                 last_f = f;
             }
-            
+
             // Add non-cycle lines as-is (but skip G80 - cancel cycle)
             if !code.contains("G80") {
                 output_lines.push(line.clone());
             }
         }
-        
+
         // Renumber lines
         let mut renumbered = Vec::new();
         let mut line_num = 10;
@@ -128,22 +135,22 @@ impl PostProcessor for Mach3Post {
                 line_num += 10;
             }
         }
-        
+
         GCodeOutput {
             lines: renumbered,
             line_number: line_num,
             step: 10,
         }
     }
-    
+
     fn name(&self) -> &str {
         "Mach3/Mach4"
     }
-    
+
     fn supports_canned_cycles(&self) -> bool {
         false // We expand them to long-form
     }
-    
+
     fn supports_subroutines(&self) -> bool {
         false // Limited subroutine support in Mach3
     }
@@ -153,7 +160,8 @@ impl PostProcessor for Mach3Post {
 fn extract_param(line: &str, param: char) -> Option<f64> {
     if let Some(pos) = line.find(param) {
         let start = pos + 1;
-        let end = line[start..].find(|c: char| c.is_whitespace() || c == 'R' || c == 'Z' || c == 'Q' || c == 'F')
+        let end = line[start..]
+            .find(|c: char| c.is_whitespace() || c == 'R' || c == 'Z' || c == 'Q' || c == 'F')
             .map(|i| start + i)
             .unwrap_or(line.len());
         line[start..end].parse::<f64>().ok()

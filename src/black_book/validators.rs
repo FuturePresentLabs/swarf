@@ -9,7 +9,7 @@ pub fn validate_parameters(
     tool: &ToolGeometry,
 ) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
-    
+
     // Check RPM limits
     let max_rpm = get_max_rpm_for_diameter(tool.diameter);
     if params.rpm > max_rpm {
@@ -26,7 +26,7 @@ pub fn validate_parameters(
             )),
         });
     }
-    
+
     // Check chip load
     let max_chip_load = tool.diameter * 0.05; // 5% of diameter is aggressive
     if params.chip_load_ipt > max_chip_load {
@@ -40,7 +40,7 @@ pub fn validate_parameters(
             suggestion: Some("Reduce feed or increase RPM".to_string()),
         });
     }
-    
+
     // Check for rubbing (too low chip load)
     let min_chip_load = 0.0005; // 0.0005" is about rubbing threshold
     if params.chip_load_ipt < min_chip_load && params.feed_rate_ipm > 0.0 {
@@ -54,12 +54,12 @@ pub fn validate_parameters(
             suggestion: Some("Increase feed rate or reduce RPM".to_string()),
         });
     }
-    
+
     // Check L/D ratio for tool deflection
     // Assuming stickout is 3x diameter for now (should come from tool data)
     let stickout = tool.diameter * 3.0;
     let ld_ratio = stickout / tool.diameter;
-    
+
     if ld_ratio > 4.0 && params.doc > tool.diameter * 0.5 {
         issues.push(ValidationIssue {
             severity: Severity::Warning,
@@ -71,7 +71,7 @@ pub fn validate_parameters(
             suggestion: Some("Reduce DOC or use shorter tool".to_string()),
         });
     }
-    
+
     // Material-specific checks
     match material.category {
         MaterialCategory::StainlessAustenitic => {
@@ -79,7 +79,8 @@ pub fn validate_parameters(
                 issues.push(ValidationIssue {
                     severity: Severity::Error,
                     code: "WORK_HARDENING_RISK".to_string(),
-                    message: "Low feed rate may cause work hardening in austenitic stainless".to_string(),
+                    message: "Low feed rate may cause work hardening in austenitic stainless"
+                        .to_string(),
                     suggestion: Some(format!(
                         "Increase feed to at least {:.1} IPM to stay ahead of hardening front",
                         tool.diameter * 30.0
@@ -109,7 +110,7 @@ pub fn validate_parameters(
         }
         _ => {}
     }
-    
+
     // Check for proper coolant
     if material.coolant_required {
         issues.push(ValidationIssue {
@@ -119,7 +120,7 @@ pub fn validate_parameters(
             suggestion: None,
         });
     }
-    
+
     issues
 }
 
@@ -128,13 +129,13 @@ fn get_max_rpm_for_diameter(diameter: f64) -> u32 {
     // Based on typical spindle limits and tool balance
     // Smaller tools can run faster
     match diameter {
-        d if d <= 0.0625 => 40000,  // 1/16"
-        d if d <= 0.125 => 30000,   // 1/8"
-        d if d <= 0.25 => 20000,    // 1/4"
-        d if d <= 0.375 => 15000,   // 3/8"
-        d if d <= 0.5 => 12000,     // 1/2"
-        d if d <= 0.75 => 8000,     // 3/4"
-        d if d <= 1.0 => 6000,      // 1"
+        d if d <= 0.0625 => 40000, // 1/16"
+        d if d <= 0.125 => 30000,  // 1/8"
+        d if d <= 0.25 => 20000,   // 1/4"
+        d if d <= 0.375 => 15000,  // 3/8"
+        d if d <= 0.5 => 12000,    // 1/2"
+        d if d <= 0.75 => 8000,    // 3/4"
+        d if d <= 1.0 => 6000,     // 1"
         _ => 4000,
     }
 }
@@ -173,7 +174,7 @@ pub fn check_safety_limits(
     machine_max_hp: f64,
 ) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
-    
+
     if params.rpm > machine_max_rpm {
         issues.push(ValidationIssue {
             severity: Severity::Error,
@@ -185,7 +186,7 @@ pub fn check_safety_limits(
             suggestion: Some("Use larger tool or different material strategy".to_string()),
         });
     }
-    
+
     if params.feed_rate_ipm > machine_max_feed {
         issues.push(ValidationIssue {
             severity: Severity::Error,
@@ -197,7 +198,7 @@ pub fn check_safety_limits(
             suggestion: Some("Reduce feed or use different tool/flute count".to_string()),
         });
     }
-    
+
     if params.hp_required > machine_max_hp {
         issues.push(ValidationIssue {
             severity: Severity::Warning,
@@ -209,7 +210,7 @@ pub fn check_safety_limits(
             suggestion: Some("Reduce DOC/WOC or take lighter passes".to_string()),
         });
     }
-    
+
     issues
 }
 
@@ -222,7 +223,7 @@ pub fn estimate_tool_life(
 ) -> ToolLifeEstimate {
     // Very rough estimation based on Taylor's Tool Life Equation
     // VT^n = C
-    
+
     let n = 0.25; // Exponent for carbide
     let c = match tool_material {
         ToolMaterial::HSS => 80.0,
@@ -233,25 +234,28 @@ pub fn estimate_tool_life(
         ToolMaterial::CBN => 3000.0,
         ToolMaterial::Diamond => 5000.0,
     };
-    
+
     // Adjust C for material machinability
     let adjusted_c = c * (material.machinability_rating / 100.0);
-    
+
     // Minutes of tool life
     let life_minutes = (adjusted_c / sfm).powf(1.0 / n);
-    
+
     // Adjust for chip load (aggressive chip load reduces life)
     let chip_load_factor = 1.0 / (1.0 + (chip_load / 0.01) * 0.1);
-    
+
     let adjusted_life = life_minutes * chip_load_factor;
-    
+
     ToolLifeEstimate {
         estimated_minutes: adjusted_life,
         estimated_parts: None, // Would need part cycle time
         confidence: if sfm < 200.0 { 0.8 } else { 0.6 },
         factors: vec![
             format!("SFM: {:.0}", sfm),
-            format!("Material machinability: {:.0}%", material.machinability_rating),
+            format!(
+                "Material machinability: {:.0}%",
+                material.machinability_rating
+            ),
         ],
     }
 }
@@ -266,14 +270,14 @@ pub struct ToolLifeEstimate {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::materials::load_material_database;
-    
+    use super::*;
+
     #[test]
     fn test_validation_finds_issues() {
         let db = load_material_database();
         let material = db.get("Stainless 304").unwrap();
-        
+
         let tool = ToolGeometry {
             diameter: 0.25,
             flute_count: 4,
@@ -281,7 +285,7 @@ mod tests {
             corner_radius: None,
             coating: None,
         };
-        
+
         // Create parameters with low feed (will cause work hardening warning)
         let params = CuttingParameters {
             rpm: 5000,
@@ -294,20 +298,20 @@ mod tests {
             material_removal_rate: 0.025,
             warnings: vec![],
         };
-        
+
         let issues = validate_parameters(&params, material, &tool);
-        
+
         // Should find work hardening issue
         assert!(issues.iter().any(|i| i.code == "WORK_HARDENING_RISK"));
     }
-    
+
     #[test]
     fn test_rpm_limits() {
         assert_eq!(get_max_rpm_for_diameter(0.125), 30000);
         assert_eq!(get_max_rpm_for_diameter(0.5), 12000);
         assert_eq!(get_max_rpm_for_diameter(1.0), 6000);
     }
-    
+
     #[test]
     fn test_machine_safety_limits() {
         let params = CuttingParameters {
@@ -321,27 +325,27 @@ mod tests {
             material_removal_rate: 0.5,
             warnings: vec![],
         };
-        
+
         let issues = check_safety_limits(&params, 10000, 50.0, 3.0);
-        
+
         // Should have RPM, feed, and HP issues
         assert!(issues.iter().any(|i| i.code == "MACHINE_RPM_EXCEEDED"));
         assert!(issues.iter().any(|i| i.code == "MACHINE_FEED_EXCEEDED"));
         assert!(issues.iter().any(|i| i.code == "MACHINE_HP_LIMIT"));
     }
-    
+
     #[test]
     fn test_tool_life_estimate() {
         let db = load_material_database();
         let material = db.get("Aluminum 6061-T6").unwrap();
-        
+
         let estimate = estimate_tool_life(
             material,
             1200.0, // SFM
             0.002,  // IPT
             ToolMaterial::Carbide,
         );
-        
+
         assert!(estimate.estimated_minutes > 0.0);
         assert!(estimate.confidence > 0.0);
     }

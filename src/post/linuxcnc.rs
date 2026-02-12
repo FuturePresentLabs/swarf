@@ -21,28 +21,28 @@ impl PostProcessor for LinuxCncPost {
             "G94 ; Feed per minute".to_string(),
             "".to_string(),
         ];
-        
+
         // Copy input lines
         for line in &input.lines {
             // LinuxCNC is mostly compatible, just pass through
             output_lines.push(line.clone());
         }
-        
+
         GCodeOutput {
             lines: output_lines,
             line_number: input.line_number,
             step: input.step,
         }
     }
-    
+
     fn name(&self) -> &str {
         "LinuxCNC"
     }
-    
+
     fn supports_canned_cycles(&self) -> bool {
         true
     }
-    
+
     fn supports_subroutines(&self) -> bool {
         true // LinuxCNC has O-subroutines
     }

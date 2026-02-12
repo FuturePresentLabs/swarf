@@ -2,12 +2,12 @@
 #![allow(clippy::upper_case_acronyms)]
 
 mod ast;
+pub mod black_book;
+mod codegen;
 mod lexer;
 mod parser;
-mod codegen;
-mod validator;
-pub mod black_book;
 pub mod post;
+mod validator;
 
 #[cfg(feature = "viz")]
 mod viz;
@@ -58,11 +58,15 @@ fn main() {
                 let use_2d = args.iter().any(|a| a == "--2d");
 
                 // Check for --png flag
-                let png_output = args.iter().position(|a| a == "--png")
+                let png_output = args
+                    .iter()
+                    .position(|a| a == "--png")
                     .and_then(|i| args.get(i + 1));
 
                 // Find the file argument (first non-flag argument after command)
-                let file_arg = args.iter().skip(2)
+                let file_arg = args
+                    .iter()
+                    .skip(2)
                     .filter(|a| !a.starts_with("--"))
                     .filter(|a| {
                         // Skip the value after --png
@@ -212,10 +216,20 @@ fn print_usage() {
 }
 
 fn compile(input_path: &str, output_path: &str) -> Result<(), Error> {
-    compile_with_post(input_path, output_path, post::PostProcessorType::Generic, None)
+    compile_with_post(
+        input_path,
+        output_path,
+        post::PostProcessorType::Generic,
+        None,
+    )
 }
 
-fn compile_with_post(input_path: &str, output_path: &str, post_type: post::PostProcessorType, max_rpm: Option<f64>) -> Result<(), Error> {
+fn compile_with_post(
+    input_path: &str,
+    output_path: &str,
+    post_type: post::PostProcessorType,
+    max_rpm: Option<f64>,
+) -> Result<(), Error> {
     // Read input
     let source = fs::read_to_string(input_path)?;
 
@@ -252,7 +266,11 @@ fn compile_with_post(input_path: &str, output_path: &str, post_type: post::PostP
     // Write output
     fs::write(output_path, gcode)?;
 
-    println!("Generated: {} (using {} post-processor)", output_path, processor.name());
+    println!(
+        "Generated: {} (using {} post-processor)",
+        output_path,
+        processor.name()
+    );
 
     Ok(())
 }
@@ -276,13 +294,15 @@ drill at x 10 y 20 depth 5 peck 2 feed 100
         let tokens = lexer::lex(source);
         let mut parser = parser::Parser::new(tokens);
         let program = parser.parse().expect("parse failed");
-        
+
         let validator = validator::Validator::new();
-        validator.validate_program(&program).expect("validation failed");
-        
+        validator
+            .validate_program(&program)
+            .expect("validation failed");
+
         let mut codegen = codegen::CodeGenerator::new();
         let gcode = codegen.generate(&program);
-        
+
         assert!(gcode.contains("G83")); // Peck drill cycle
         assert!(gcode.contains("M30")); // Program end
     }
@@ -302,13 +322,15 @@ drill at x 0.5 y 0.5 depth 0.25
         let tokens = lexer::lex(source);
         let mut parser = parser::Parser::new(tokens);
         let program = parser.parse().expect("parse failed");
-        
+
         let validator = validator::Validator::new();
-        validator.validate_program(&program).expect("validation failed");
-        
+        validator
+            .validate_program(&program)
+            .expect("validation failed");
+
         let mut codegen = codegen::CodeGenerator::new();
         let gcode = codegen.generate(&program);
-        
+
         println!("Generated G-code:\n{}", gcode);
         assert!(gcode.contains("G20")); // Imperial units
         assert!(gcode.contains("M30")); // Program end

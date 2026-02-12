@@ -5,21 +5,21 @@
 
 use crate::codegen::GCodeOutput;
 
-pub mod mach3;
-pub mod linuxcnc;
 pub mod haas;
+pub mod linuxcnc;
+pub mod mach3;
 
 /// Post-processor trait - implemented for each controller type
 pub trait PostProcessor {
     /// Convert generic G-code to machine-specific output
     fn process(&self, input: &GCodeOutput) -> GCodeOutput;
-    
+
     /// Machine/controller name
     fn name(&self) -> &str;
-    
+
     /// Whether this controller supports canned cycles (G81, G83, etc.)
     fn supports_canned_cycles(&self) -> bool;
-    
+
     /// Whether this controller supports subroutines/macros
     fn supports_subroutines(&self) -> bool;
 }
@@ -27,10 +27,10 @@ pub trait PostProcessor {
 /// Available post-processors
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PostProcessorType {
-    Generic,    // Fanuc-compatible (default)
-    Mach3,      // Mach3/Mach4 (limited canned cycles)
-    LinuxCNC,   // LinuxCNC (full Fanuc + extensions)
-    Haas,       // Haas (Fanuc + Haas specifics)
+    Generic,  // Fanuc-compatible (default)
+    Mach3,    // Mach3/Mach4 (limited canned cycles)
+    LinuxCNC, // LinuxCNC (full Fanuc + extensions)
+    Haas,     // Haas (Fanuc + Haas specifics)
 }
 
 impl PostProcessorType {
@@ -57,38 +57,45 @@ impl PostProcessor for GenericPost {
             step: input.step,
         }
     }
-    
+
     fn name(&self) -> &str {
         "Generic Fanuc"
     }
-    
+
     fn supports_canned_cycles(&self) -> bool {
         true
     }
-    
+
     fn supports_subroutines(&self) -> bool {
         true
     }
 }
 
 /// Convert G83 peck drill to long-form G-code for controllers without canned cycles
-pub fn g83_to_long_form(x: f64, y: f64, r_plane: f64, z_depth: f64, q_peck: f64, feed: f64) -> Vec<String> {
+pub fn g83_to_long_form(
+    x: f64,
+    y: f64,
+    r_plane: f64,
+    z_depth: f64,
+    q_peck: f64,
+    feed: f64,
+) -> Vec<String> {
     let mut lines = Vec::new();
-    
+
     // Position
     lines.push(format!("G00 X{:.4} Y{:.4}", x, y));
     lines.push(format!("G00 Z{:.4}", r_plane));
-    
+
     // Calculate pecks
     let total_depth = z_depth.abs();
     let num_pecks = (total_depth / q_peck).ceil() as i32;
-    
+
     for i in 1..=num_pecks {
         let peck_depth = (i as f64 * q_peck).min(total_depth);
-        
+
         // Drill to peck depth
         lines.push(format!("G01 Z-{:.4} F{:.1}", peck_depth, feed));
-        
+
         // Retract to clear chips (full retract for chip clearance)
         if i < num_pecks {
             lines.push(format!("G00 Z{:.4}", r_plane));
@@ -99,10 +106,10 @@ pub fn g83_to_long_form(x: f64, y: f64, r_plane: f64, z_depth: f64, q_peck: f64,
             }
         }
     }
-    
+
     // Final retract
     lines.push(format!("G00 Z{:.4}", r_plane));
-    
+
     lines
 }
 
@@ -117,7 +124,14 @@ pub fn g81_to_long_form(x: f64, y: f64, r_plane: f64, z_depth: f64, feed: f64) -
 }
 
 /// Convert G82 drill with dwell to long-form
-pub fn g82_to_long_form(x: f64, y: f64, r_plane: f64, z_depth: f64, dwell_secs: f64, feed: f64) -> Vec<String> {
+pub fn g82_to_long_form(
+    x: f64,
+    y: f64,
+    r_plane: f64,
+    z_depth: f64,
+    dwell_secs: f64,
+    feed: f64,
+) -> Vec<String> {
     vec![
         format!("G00 X{:.4} Y{:.4}", x, y),
         format!("G00 Z{:.4}", r_plane),
@@ -134,7 +148,7 @@ mod tests {
     #[test]
     fn test_g83_long_form() {
         let lines = g83_to_long_form(1.0, 0.5, 0.1, 0.55, 0.25, 15.0);
-        
+
         // Should have position, rapid down, multiple pecks, retracts
         assert!(lines.iter().any(|l| l.contains("G00 X1.0000 Y0.5000")));
         assert!(lines.iter().any(|l| l.contains("G01 Z-0.2500")));

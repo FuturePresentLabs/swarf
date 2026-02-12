@@ -67,19 +67,25 @@ impl Parser {
 
         // Skip leading newlines
         self.skip_newlines();
-        
+
         // Parse header declarations
-        while self.peek() == Some(&Token::Units) 
+        while self.peek() == Some(&Token::Units)
             || self.peek() == Some(&Token::Offset)
-            || self.peek() == Some(&Token::Coolant) {
-            
+            || self.peek() == Some(&Token::Coolant)
+        {
             match self.peek() {
                 Some(Token::Units) => {
                     self.consume(Token::Units)?;
                     units = match self.peek() {
-                        Some(Token::Metric) => { self.advance(); Units::Metric }
-                        Some(Token::Imperial) => { self.advance(); Units::Imperial }
-                        _ => return Err(self.error("expected 'metric' or 'imperial'"))?
+                        Some(Token::Metric) => {
+                            self.advance();
+                            Units::Metric
+                        }
+                        Some(Token::Imperial) => {
+                            self.advance();
+                            Units::Imperial
+                        }
+                        _ => return Err(self.error("expected 'metric' or 'imperial'"))?,
                     };
                 }
                 Some(Token::Offset) => {
@@ -98,10 +104,19 @@ impl Parser {
                 Some(Token::Coolant) => {
                     self.consume(Token::Coolant)?;
                     safety.coolant = match self.peek() {
-                        Some(Token::Flood) => { self.advance(); CoolantMode::Flood }
-                        Some(Token::Mist) => { self.advance(); CoolantMode::Mist }
-                        Some(Token::Off) => { self.advance(); CoolantMode::Off }
-                        _ => return Err(self.error("expected 'flood', 'mist', or 'off'"))?
+                        Some(Token::Flood) => {
+                            self.advance();
+                            CoolantMode::Flood
+                        }
+                        Some(Token::Mist) => {
+                            self.advance();
+                            CoolantMode::Mist
+                        }
+                        Some(Token::Off) => {
+                            self.advance();
+                            CoolantMode::Off
+                        }
+                        _ => return Err(self.error("expected 'flood', 'mist', or 'off'"))?,
                     };
                 }
                 _ => break,
@@ -109,7 +124,11 @@ impl Parser {
             self.skip_newlines();
         }
 
-        Ok(Header { units, work_offset, safety })
+        Ok(Header {
+            units,
+            work_offset,
+            safety,
+        })
     }
 
     fn parse_operations(&mut self) -> Result<Vec<Operation>> {
@@ -117,7 +136,7 @@ impl Parser {
 
         while self.position < self.tokens.len() {
             self.skip_newlines();
-            
+
             if self.position >= self.tokens.len() {
                 break;
             }
@@ -127,7 +146,7 @@ impl Parser {
                 Some(Token::Spindle) => self.parse_spindle()?,
                 Some(Token::Drill) => {
                     // Check if this is v2 syntax by looking ahead
-                    // v2: drill <dia> at ... 
+                    // v2: drill <dia> at ...
                     // v1: drill at ...
                     if self.is_drill_v2() {
                         Operation::DrillV2(self.parse_drill_v2()?)
@@ -214,7 +233,8 @@ impl Parser {
             // If followed by dimensions and then 'at', it's v2
             let mut pos = self.position + 1;
             // Skip shape keyword if present
-            if let Some((Token::Rect | Token::Rectangle | Token::Circle, _)) = self.tokens.get(pos) {
+            if let Some((Token::Rect | Token::Rectangle | Token::Circle, _)) = self.tokens.get(pos)
+            {
                 pos += 1;
             }
             // Should be numbers (dimensions)
@@ -228,7 +248,7 @@ impl Parser {
     fn parse_tool_change(&mut self) -> Result<Operation> {
         self.consume(Token::Tool)?;
         let tool_num = self.expect_number()? as u8;
-        
+
         let tool_data = if self.peek() == Some(&Token::Diameter) {
             Some(self.parse_tool_data()?)
         } else {
@@ -244,10 +264,10 @@ impl Parser {
     fn parse_tool_data(&mut self) -> Result<ToolData> {
         self.consume(Token::Diameter)?;
         let diameter = self.expect_number()?;
-        
+
         self.consume(Token::Length)?;
         let length = self.expect_number()?;
-        
+
         let flutes = if self.peek() == Some(&Token::Flutes) {
             self.advance();
             self.expect_number()? as u8
@@ -275,12 +295,21 @@ impl Parser {
 
     fn parse_spindle(&mut self) -> Result<Operation> {
         self.consume(Token::Spindle)?;
-        
+
         let direction = match self.peek() {
-            Some(Token::CW) => { self.advance(); SpindleDir::CW }
-            Some(Token::CCW) => { self.advance(); SpindleDir::CCW }
-            Some(Token::Off) => { self.advance(); SpindleDir::Off }
-            _ => return Err(self.error("expected direction (cw, ccw, off)"))?
+            Some(Token::CW) => {
+                self.advance();
+                SpindleDir::CW
+            }
+            Some(Token::CCW) => {
+                self.advance();
+                SpindleDir::CCW
+            }
+            Some(Token::Off) => {
+                self.advance();
+                SpindleDir::Off
+            }
+            _ => return Err(self.error("expected direction (cw, ccw, off)"))?,
         };
 
         let rpm = if self.peek() == Some(&Token::RPM) {
@@ -296,9 +325,9 @@ impl Parser {
     fn parse_drill(&mut self) -> Result<Operation> {
         self.consume(Token::Drill)?;
         self.consume(Token::At)?;
-        
+
         let positions = self.parse_positions()?;
-        
+
         self.consume(Token::Depth)?;
         let depth = self.expect_number()?;
 
@@ -342,9 +371,9 @@ impl Parser {
 
     fn parse_pocket(&mut self) -> Result<Operation> {
         self.consume(Token::Pocket)?;
-        
+
         let geometry = self.parse_geometry()?;
-        
+
         self.consume(Token::Depth)?;
         let depth = self.expect_number()?;
 
@@ -396,16 +425,25 @@ impl Parser {
 
     fn parse_profile(&mut self) -> Result<Operation> {
         self.consume(Token::Profile)?;
-        
+
         let side = match self.peek() {
-            Some(Token::Inside) => { self.advance(); CutSide::Inside }
-            Some(Token::Outside) => { self.advance(); CutSide::Outside }
-            Some(Token::On) => { self.advance(); CutSide::On }
+            Some(Token::Inside) => {
+                self.advance();
+                CutSide::Inside
+            }
+            Some(Token::Outside) => {
+                self.advance();
+                CutSide::Outside
+            }
+            Some(Token::On) => {
+                self.advance();
+                CutSide::On
+            }
             _ => CutSide::On, // Default
         };
 
         let geometry = self.parse_geometry()?;
-        
+
         self.consume(Token::Depth)?;
         let depth = self.expect_number()?;
 
@@ -442,9 +480,9 @@ impl Parser {
 
     fn parse_face(&mut self) -> Result<Operation> {
         self.consume(Token::Face)?;
-        
+
         let bounds = self.parse_rectangle()?;
-        
+
         self.consume(Token::Depth)?;
         let depth = self.expect_number()?;
 
@@ -473,9 +511,9 @@ impl Parser {
     fn parse_tap(&mut self) -> Result<Operation> {
         self.consume(Token::Tap)?;
         self.consume(Token::At)?;
-        
+
         let positions = self.parse_positions()?;
-        
+
         self.consume(Token::Depth)?;
         let depth = self.expect_number()?;
 
@@ -502,22 +540,20 @@ impl Parser {
             Some(Token::Rectangle) | Some(Token::Rect) => {
                 Ok(Geometry::Rect(self.parse_rectangle()?))
             }
-            Some(Token::Circle) => {
-                Ok(Geometry::Circle(self.parse_circle()?))
-            }
-            _ => Err(self.error("expected geometry (rectangle, circle)"))?
+            Some(Token::Circle) => Ok(Geometry::Circle(self.parse_circle()?)),
+            _ => Err(self.error("expected geometry (rectangle, circle)"))?,
         }
     }
 
     fn parse_rectangle(&mut self) -> Result<Rectangle> {
         self.consume_one_of(&[Token::Rectangle, Token::Rect])?;
         self.consume(Token::At)?;
-        
+
         let pos = self.parse_position()?;
-        
+
         self.consume(Token::Width)?;
         let width = self.expect_number()?;
-        
+
         self.consume(Token::Height)?;
         let height = self.expect_number()?;
 
@@ -540,9 +576,9 @@ impl Parser {
     fn parse_circle(&mut self) -> Result<Circle> {
         self.consume(Token::Circle)?;
         self.consume(Token::At)?;
-        
+
         let center = self.parse_position()?;
-        
+
         self.consume(Token::Diameter)?;
         let diameter = self.expect_number()?;
 
@@ -551,7 +587,7 @@ impl Parser {
 
     fn parse_positions(&mut self) -> Result<Vec<Position>> {
         let mut positions = Vec::new();
-        
+
         // Single position or grid
         if self.peek() == Some(&Token::Grid) {
             self.advance();
@@ -676,12 +712,12 @@ impl Parser {
     fn parse_part_def(&mut self) -> Result<PartDef> {
         self.consume(Token::Part)?;
         let name = self.expect_string()?;
-        
+
         let existing = self.peek() == Some(&Token::Existing);
         if existing {
             self.advance();
         }
-        
+
         // Optional stock definition (inline)
         let stock = if self.peek() == Some(&Token::Stock) {
             self.advance(); // consume 'stock' token
@@ -689,14 +725,14 @@ impl Parser {
         } else {
             None
         };
-        
+
         Ok(PartDef {
             name,
             stock,
             existing,
         })
     }
-    
+
     fn parse_stock_def(&mut self) -> Result<StockDef> {
         // Parse as: 3x2x0.5 6061-T6 or material first
         let (size_x, size_y, size_z, material);
@@ -738,7 +774,7 @@ impl Parser {
             size_z,
         })
     }
-    
+
     fn parse_setup_block(&mut self) -> Result<SetupBlock> {
         self.consume(Token::Setup)?;
         self.consume(Token::LBrace)?;
@@ -771,7 +807,9 @@ impl Parser {
                     y_limit = Some(self.expect_number()?);
                 }
                 _ => {
-                    return Err(self.error("expected 'zero', 'material', 'z-min', or 'y-limit' in setup block"));
+                    return Err(self.error(
+                        "expected 'zero', 'material', 'z-min', or 'y-limit' in setup block",
+                    ));
                 }
             }
 
@@ -787,43 +825,74 @@ impl Parser {
             y_limit,
         })
     }
-    
+
     fn parse_zero_config(&mut self) -> Result<ZeroConfig> {
         // Parse: "bottom-right bottom" or "top-left top"
         let x_ref = match self.peek() {
-            Some(Token::Left) => { self.advance(); XRef::Left }
-            Some(Token::Right) => { self.advance(); XRef::Right }
-            Some(Token::Center) => { self.advance(); XRef::Center }
+            Some(Token::Left) => {
+                self.advance();
+                XRef::Left
+            }
+            Some(Token::Right) => {
+                self.advance();
+                XRef::Right
+            }
+            Some(Token::Center) => {
+                self.advance();
+                XRef::Center
+            }
             _ => return Err(self.error("expected left, right, or center")),
         };
-        
+
         let y_ref = match self.peek() {
-            Some(Token::Front) => { self.advance(); YRef::Front }
-            Some(Token::Back) => { self.advance(); YRef::Back }
-            Some(Token::Center) => { self.advance(); YRef::Center }
+            Some(Token::Front) => {
+                self.advance();
+                YRef::Front
+            }
+            Some(Token::Back) => {
+                self.advance();
+                YRef::Back
+            }
+            Some(Token::Center) => {
+                self.advance();
+                YRef::Center
+            }
             _ => return Err(self.error("expected front, back, or center")),
         };
-        
+
         let z_ref = match self.peek() {
-            Some(Token::Top) => { self.advance(); ZRef::Top }
-            Some(Token::Bottom) => { self.advance(); ZRef::Bottom }
-            Some(Token::Center) => { self.advance(); ZRef::Center }
+            Some(Token::Top) => {
+                self.advance();
+                ZRef::Top
+            }
+            Some(Token::Bottom) => {
+                self.advance();
+                ZRef::Bottom
+            }
+            Some(Token::Center) => {
+                self.advance();
+                ZRef::Center
+            }
             _ => return Err(self.error("expected top, bottom, or center")),
         };
-        
-        Ok(ZeroConfig { x_ref, y_ref, z_ref })
+
+        Ok(ZeroConfig {
+            x_ref,
+            y_ref,
+            z_ref,
+        })
     }
-    
+
     fn parse_cut_op(&mut self) -> Result<CutOp> {
         self.consume(Token::Cut)?;
         let direction = self.parse_direction()?;
-        
+
         let sweep = self.expect_number_or_fraction()?;
         let depth = self.expect_number_or_fraction()?;
         let height = self.expect_number_or_fraction()?;
-        
+
         let z_constraint = self.parse_z_constraint()?;
-        
+
         Ok(CutOp {
             direction,
             sweep,
@@ -832,7 +901,7 @@ impl Parser {
             z_constraint,
         })
     }
-    
+
     fn parse_direction(&mut self) -> Result<Direction> {
         match self.peek() {
             Some(Token::Direction(dir)) => {
@@ -851,7 +920,7 @@ impl Parser {
             _ => Err(self.error("expected direction like X+, Y-, Z+, etc.")),
         }
     }
-    
+
     fn parse_z_constraint(&mut self) -> Result<ZConstraint> {
         match self.peek() {
             Some(Token::Direction(dir)) => {
@@ -870,10 +939,10 @@ impl Parser {
     fn parse_drill_v2(&mut self) -> Result<DrillV2Op> {
         self.consume(Token::Drill)?;
         let diameter = self.expect_number_or_fraction()?;
-        
+
         self.consume(Token::At)?;
         let position = self.parse_at_position()?;
-        
+
         let depth = if self.peek() == Some(&Token::Thru) {
             self.advance();
             DrillDepth::Thru
@@ -884,7 +953,7 @@ impl Parser {
             // Could be just a number
             DrillDepth::Depth(self.expect_number_or_fraction()?)
         };
-        
+
         Ok(DrillV2Op {
             diameter,
             position,
@@ -894,27 +963,28 @@ impl Parser {
 
     fn parse_pocket_v2(&mut self) -> Result<PocketV2Op> {
         self.consume(Token::Pocket)?;
-        
+
         // Parse shape: either rect/circle or just dimensions
-        let (shape, depth) = if self.peek() == Some(&Token::Rect) || self.peek() == Some(&Token::Rectangle) {
-            self.advance();
-            let width = self.expect_number_or_fraction()?;
-            let height = self.expect_number_or_fraction()?;
-            let depth = self.expect_number_or_fraction()?;
-            (PocketShape::Rect { width, height }, depth)
-        } else if self.peek() == Some(&Token::Circle) {
-            self.advance();
-            let diameter = self.expect_number_or_fraction()?;
-            let depth = self.expect_number_or_fraction()?;
-            (PocketShape::Circle { diameter }, depth)
-        } else {
-            // Just dimensions: width height depth
-            let width = self.expect_number_or_fraction()?;
-            let height = self.expect_number_or_fraction()?;
-            let depth = self.expect_number_or_fraction()?;
-            (PocketShape::Rect { width, height }, depth)
-        };
-        
+        let (shape, depth) =
+            if self.peek() == Some(&Token::Rect) || self.peek() == Some(&Token::Rectangle) {
+                self.advance();
+                let width = self.expect_number_or_fraction()?;
+                let height = self.expect_number_or_fraction()?;
+                let depth = self.expect_number_or_fraction()?;
+                (PocketShape::Rect { width, height }, depth)
+            } else if self.peek() == Some(&Token::Circle) {
+                self.advance();
+                let diameter = self.expect_number_or_fraction()?;
+                let depth = self.expect_number_or_fraction()?;
+                (PocketShape::Circle { diameter }, depth)
+            } else {
+                // Just dimensions: width height depth
+                let width = self.expect_number_or_fraction()?;
+                let height = self.expect_number_or_fraction()?;
+                let depth = self.expect_number_or_fraction()?;
+                (PocketShape::Rect { width, height }, depth)
+            };
+
         self.consume(Token::At)?;
         let position = self.parse_at_position()?;
 
@@ -986,7 +1056,7 @@ impl Parser {
             }
         }
     }
-    
+
     fn expect_number_or_fraction(&mut self) -> Result<f64> {
         match self.peek() {
             Some(Token::Number(Some(n))) => {
@@ -1009,7 +1079,7 @@ impl Parser {
             None => Err(ParseError::UnexpectedEOF),
         }
     }
-    
+
     fn expect_string(&mut self) -> Result<String> {
         match self.peek() {
             Some(Token::String(s)) => {
@@ -1029,7 +1099,7 @@ impl Parser {
             None => Err(ParseError::UnexpectedEOF),
         }
     }
-    
+
     fn get_current_token_text(&self) -> String {
         if self.tokens.get(self.position).is_some() {
             // This would need the original input to work properly
@@ -1061,30 +1131,30 @@ cut Y+ 0.625 0.125 0.3 Z+"#;
 
         let tokens = lex(input);
         let mut parser = Parser::new(tokens);
-        
+
         // Parse part definition
         let part = parser.parse_part_def().expect("should parse part def");
         assert_eq!(part.name, "housing-mod");
         assert!(part.existing);
-        
+
         // Skip newlines
         parser.skip_newlines();
-        
+
         // Parse setup block
         let setup = parser.parse_setup_block().expect("should parse setup");
         assert_eq!(setup.z_min, Some(0.0));
         assert_eq!(setup.y_limit, Some(-0.25));
-        
+
         // Skip newlines
         parser.skip_newlines();
-        
+
         // Parse cut operation
         let cut = parser.parse_cut_op().expect("should parse cut op");
         assert_eq!(cut.sweep, 0.625);
         assert_eq!(cut.depth, 0.125);
         assert_eq!(cut.height, 0.3);
         match cut.z_constraint {
-            ZConstraint::Positive => {},
+            ZConstraint::Positive => {}
             _ => panic!("expected Z+ constraint"),
         }
     }
@@ -1093,7 +1163,7 @@ cut Y+ 0.625 0.125 0.3 Z+"#;
     fn test_fraction_parsing() {
         let input = "cut Y+ 5/8 1/8 3/10 Z+";
         let tokens = lex(input);
-        
+
         // Check that fractions are tokenized correctly
         let token_types: Vec<_> = tokens.iter().map(|(t, _)| t).collect();
         assert!(matches!(token_types[2], Token::Fraction(Some(0.625))));
@@ -1104,7 +1174,7 @@ cut Y+ 0.625 0.125 0.3 Z+"#;
     fn test_direction_tokenizing() {
         let input = "Y+ X- Z+";
         let tokens = lex(input);
-        
+
         assert!(matches!(&tokens[0].0, Token::Direction(s) if s == "Y+"));
         assert!(matches!(&tokens[1].0, Token::Direction(s) if s == "X-"));
         assert!(matches!(&tokens[2].0, Token::Direction(s) if s == "Z+"));
@@ -1115,7 +1185,7 @@ cut Y+ 0.625 0.125 0.3 Z+"#;
         let input = "drill 0.25 at 1.0 0.5 thru";
         let tokens = lex(input);
         let mut parser = Parser::new(tokens);
-        
+
         let op = parser.parse_drill_v2().expect("should parse drill v2");
         assert_eq!(op.diameter, 0.25);
         assert_eq!(op.position.x, 1.0);
@@ -1128,8 +1198,10 @@ cut Y+ 0.625 0.125 0.3 Z+"#;
         let input = "drill 1/4 at zero depth 0.5";
         let tokens = lex(input);
         let mut parser = Parser::new(tokens);
-        
-        let op = parser.parse_drill_v2().expect("should parse drill v2 with depth");
+
+        let op = parser
+            .parse_drill_v2()
+            .expect("should parse drill v2 with depth");
         assert_eq!(op.diameter, 0.25);
         assert_eq!(op.position.x, 0.0);
         assert_eq!(op.position.y, 0.0);
@@ -1141,9 +1213,13 @@ cut Y+ 0.625 0.125 0.3 Z+"#;
         let input = "pocket rect 2.0 1.5 0.25 at 0.5 0.5";
         let tokens = lex(input);
         let mut parser = Parser::new(tokens);
-        
-        let op = parser.parse_pocket_v2().expect("should parse pocket v2 rect");
-        assert!(matches!(&op.shape, PocketShape::Rect { width, height } if *width == 2.0 && *height == 1.5));
+
+        let op = parser
+            .parse_pocket_v2()
+            .expect("should parse pocket v2 rect");
+        assert!(
+            matches!(&op.shape, PocketShape::Rect { width, height } if *width == 2.0 && *height == 1.5)
+        );
         assert_eq!(op.depth, 0.25);
         assert_eq!(op.position.x, 0.5);
         assert_eq!(op.position.y, 0.5);
@@ -1154,8 +1230,10 @@ cut Y+ 0.625 0.125 0.3 Z+"#;
         let input = "pocket circle 1.0 0.25 at 1.0 1.0";
         let tokens = lex(input);
         let mut parser = Parser::new(tokens);
-        
-        let op = parser.parse_pocket_v2().expect("should parse pocket v2 circle");
+
+        let op = parser
+            .parse_pocket_v2()
+            .expect("should parse pocket v2 circle");
         assert!(matches!(&op.shape, PocketShape::Circle { diameter } if *diameter == 1.0));
         assert_eq!(op.depth, 0.25);
     }

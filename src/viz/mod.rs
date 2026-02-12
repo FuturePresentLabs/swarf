@@ -1,9 +1,9 @@
+use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use warp::{ws::Message, Filter};
-use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Toolpath {
@@ -15,14 +15,21 @@ struct Toolpath {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Line {
-    x1: f64, y1: f64, z1: f64,
-    x2: f64, y2: f64, z2: f64,
+    x1: f64,
+    y1: f64,
+    z1: f64,
+    x2: f64,
+    y2: f64,
+    z2: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ArcMove {
-    x: f64, y: f64, z: f64,
-    i: f64, j: f64,
+    x: f64,
+    y: f64,
+    z: f64,
+    i: f64,
+    j: f64,
     start_angle: f64,
     end_angle: f64,
     clockwise: bool,
@@ -30,9 +37,12 @@ struct ArcMove {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Bounds {
-    min_x: f64, max_x: f64,
-    min_y: f64, max_y: f64,
-    min_z: f64, max_z: f64,
+    min_x: f64,
+    max_x: f64,
+    min_y: f64,
+    max_y: f64,
+    min_z: f64,
+    max_z: f64,
 }
 
 pub async fn runviz(gcode_file: String, use_2d: bool) {
@@ -44,7 +54,7 @@ pub async fn runviz(gcode_file: String, use_2d: bool) {
 
     // Determine view mode
     let view_mode = if use_2d { "2D" } else { "3D" };
-    
+
     // Use 3D viz if available and not forced to 2D
     #[cfg(feature = "viz-3d")]
     let html = if !use_2d {
@@ -52,39 +62,42 @@ pub async fn runviz(gcode_file: String, use_2d: bool) {
     } else {
         INDEX_HTML.replace("{{MODE}}", view_mode)
     };
-    
+
     #[cfg(not(feature = "viz-3d"))]
     let html = INDEX_HTML.replace("{{MODE}}", view_mode);
-    
+
     // File watcher
     let watch_path = file_path.clone();
     let watch_toolpath = toolpath.clone();
     let watch_tx = tx.clone();
-    
+
     tokio::spawn(async move {
         let (watcher_tx, mut watcher_rx) = tokio::sync::mpsc::channel(10);
-        
+
         let mut watcher = RecommendedWatcher::new(
             move |res: Result<Event, notify::Error>| {
                 let _ = watcher_tx.blocking_send(res);
             },
             Config::default(),
-        ).unwrap();
-        
-        watcher.watch(Path::new(&*watch_path), RecursiveMode::NonRecursive).unwrap();
-        
+        )
+        .unwrap();
+
+        watcher
+            .watch(Path::new(&*watch_path), RecursiveMode::NonRecursive)
+            .unwrap();
+
         while let Some(res) = watcher_rx.recv().await {
             match res {
                 Ok(_event) => {
                     // Debounce
                     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    
+
                     // Reparse
                     let new_toolpath = parse_gcode(&watch_path);
                     let mut tp = watch_toolpath.write().await;
                     *tp = new_toolpath.clone();
                     drop(tp);
-                    
+
                     // Notify clients
                     let json = serde_json::to_string(&new_toolpath).unwrap();
                     let _ = watch_tx.send(json);
@@ -93,32 +106,28 @@ pub async fn runviz(gcode_file: String, use_2d: bool) {
             }
         }
     });
-    
+
     // WebSocket route
     let toolpath_ws = toolpath.clone();
     let tx_ws = tx.clone();
-    
+
     let ws_route = warp::path("ws")
         .and(warp::ws())
         .map(move |ws: warp::ws::Ws| {
             let tp = toolpath_ws.clone();
             let tx = tx_ws.clone();
-            
-            ws.on_upgrade(move |websocket| {
-                handle_websocket(websocket, tp, tx)
-            })
+
+            ws.on_upgrade(move |websocket| handle_websocket(websocket, tp, tx))
         });
-    
+
     // Static files
-    let index = warp::path::end().map(move || {
-        warp::reply::html(html.clone())
-    });
-    
+    let index = warp::path::end().map(move || warp::reply::html(html.clone()));
+
     let routes = ws_route.or(index);
-    
+
     println!("🚀 swarf-viz running at http://localhost:3030");
     println!("📁 Watching: {}", file_path);
-    
+
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }
 
@@ -131,12 +140,12 @@ async fn handle_websocket(
 ) {
     let (mut ws_tx, mut ws_rx) = ws.split();
     let mut rx = tx.subscribe();
-    
+
     // Send initial state
     let tp = toolpath.read().await.clone();
     let json = serde_json::to_string(&tp).unwrap();
     let _ = ws_tx.send(Message::text(json)).await;
-    
+
     // Forward broadcast messages
     loop {
         tokio::select! {
@@ -162,62 +171,66 @@ async fn handle_websocket(
 
 fn parse_gcode(path: &str) -> Toolpath {
     let content = std::fs::read_to_string(path).unwrap_or_default();
-    
+
     let mut lines: Vec<Line> = Vec::new();
     let mut rapids: Vec<Line> = Vec::new();
     let arcs: Vec<ArcMove> = Vec::new();
-    
+
     let mut x = 0.0;
     let mut y = 0.0;
     let mut z = 5.0;
     let mut prev_x = 0.0;
     let mut prev_y = 0.0;
     let mut prev_z = 5.0;
-    
+
     let mut min_x = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
     let mut min_y = f64::INFINITY;
     let mut max_y = f64::NEG_INFINITY;
     let mut min_z = f64::INFINITY;
     let mut max_z = f64::NEG_INFINITY;
-    
+
     let mut is_rapid = true;
-    
+
     for line in content.lines() {
         let line = line.trim();
-        
+
         // Skip comments and empty lines
         if line.is_empty() || line.starts_with(';') {
             continue;
         }
-        
+
         let upper = line.to_uppercase();
-        
+
         // Check for G-codes
         if upper.contains("G00") || upper.contains("G0 ") {
             is_rapid = true;
         } else if upper.contains("G01") || upper.contains("G1 ") {
             is_rapid = false;
         }
-        
+
         // Parse coordinates
         let new_x = parse_coord(line, 'X').unwrap_or(x);
         let new_y = parse_coord(line, 'Y').unwrap_or(y);
         let new_z = parse_coord(line, 'Z').unwrap_or(z);
-        
+
         // Only add line if position changed
         if (new_x - x).abs() > 0.0001 || (new_y - y).abs() > 0.0001 || (new_z - z).abs() > 0.0001 {
             let line_seg = Line {
-                x1: prev_x, y1: prev_y, z1: prev_z,
-                x2: new_x, y2: new_y, z2: new_z,
+                x1: prev_x,
+                y1: prev_y,
+                z1: prev_z,
+                x2: new_x,
+                y2: new_y,
+                z2: new_z,
             };
-            
+
             if is_rapid {
                 rapids.push(line_seg);
             } else {
                 lines.push(line_seg);
             }
-            
+
             // Update bounds
             min_x = min_x.min(new_x);
             max_x = max_x.max(new_x);
@@ -225,7 +238,7 @@ fn parse_gcode(path: &str) -> Toolpath {
             max_y = max_y.max(new_y);
             min_z = min_z.min(new_z);
             max_z = max_z.max(new_z);
-            
+
             prev_x = new_x;
             prev_y = new_y;
             prev_z = new_z;
@@ -234,19 +247,29 @@ fn parse_gcode(path: &str) -> Toolpath {
             z = new_z;
         }
     }
-    
+
     // Handle case where no moves were found
     if min_x == f64::INFINITY {
-        min_x = 0.0; max_x = 100.0;
-        min_y = 0.0; max_y = 100.0;
-        min_z = 0.0; max_z = 10.0;
+        min_x = 0.0;
+        max_x = 100.0;
+        min_y = 0.0;
+        max_y = 100.0;
+        min_z = 0.0;
+        max_z = 10.0;
     }
-    
+
     Toolpath {
         lines,
         arcs,
         rapids,
-        bounds: Bounds { min_x, max_x, min_y, max_y, min_z, max_z },
+        bounds: Bounds {
+            min_x,
+            max_x,
+            min_y,
+            max_y,
+            min_z,
+            max_z,
+        },
     }
 }
 
@@ -256,7 +279,8 @@ fn parse_coord(line: &str, coord: char) -> Option<f64> {
     if let Some(pos) = line.to_uppercase().find(&prefix) {
         let rest = &line[pos + 1..];
         // Extract number (including decimal and negative)
-        let num_str: String = rest.chars()
+        let num_str: String = rest
+            .chars()
             .skip_while(|c| c.is_whitespace())
             .take_while(|c| c.is_digit(10) || *c == '.' || *c == '-')
             .collect();
@@ -459,8 +483,13 @@ static INDEX_HTML_3D: &str = r#"<!DOCTYPE html>
 </html>"#;
 
 /// Export the toolpath visualization to a PNG file
-pub fn export_to_png(gcode_file: &str, output_path: &str, width: u32, height: u32) -> Result<(), Box<dyn std::error::Error>> {
-    use image::{RgbImage, Rgb};
+pub fn export_to_png(
+    gcode_file: &str,
+    output_path: &str,
+    width: u32,
+    height: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use image::{Rgb, RgbImage};
 
     let toolpath = parse_gcode(&gcode_file.to_string());
 
@@ -519,8 +548,10 @@ pub fn export_to_png(gcode_file: &str, output_path: &str, width: u32, height: u3
     img.save(output_path)?;
     println!("✓ Exported to {}", output_path);
     println!("  Dimensions: {}x{}", width, height);
-    println!("  Bounds: X{:.3} to {:.3}, Y{:.3} to {:.3}",
-        bounds.min_x, bounds.max_x, bounds.min_y, bounds.max_y);
+    println!(
+        "  Bounds: X{:.3} to {:.3}, Y{:.3} to {:.3}",
+        bounds.min_x, bounds.max_x, bounds.min_y, bounds.max_y
+    );
 
     Ok(())
 }

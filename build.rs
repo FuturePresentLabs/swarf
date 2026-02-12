@@ -13,9 +13,7 @@ fn build_wasm_viz() {
     println!("cargo:rerun-if-changed=swarf-viz-wasm/Cargo.toml");
 
     // Check if wasm-pack is installed
-    let wasm_pack_check = Command::new("wasm-pack")
-        .arg("--version")
-        .output();
+    let wasm_pack_check = Command::new("wasm-pack").arg("--version").output();
 
     if wasm_pack_check.is_err() {
         println!("cargo:warning=wasm-pack not found. Install with: cargo install wasm-pack");

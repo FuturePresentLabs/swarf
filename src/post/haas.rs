@@ -23,7 +23,7 @@ impl PostProcessor for HaasPost {
             "G98 ; Return to initial plane (Haas default)".to_string(),
             "".to_string(),
         ];
-        
+
         // Copy input lines with potential Haas optimizations
         for line in &input.lines {
             // Haas is mostly compatible, just pass through
@@ -32,27 +32,27 @@ impl PostProcessor for HaasPost {
             // - G84 rigid tapping (already using G84)
             output_lines.push(line.clone());
         }
-        
+
         // Add program end
         output_lines.push("".to_string());
         output_lines.push("M30 ; Program end and rewind".to_string());
         output_lines.push("%".to_string());
-        
+
         GCodeOutput {
             lines: output_lines,
             line_number: input.line_number,
             step: input.step,
         }
     }
-    
+
     fn name(&self) -> &str {
         "Haas"
     }
-    
+
     fn supports_canned_cycles(&self) -> bool {
         true
     }
-    
+
     fn supports_subroutines(&self) -> bool {
         true // Haas supports subroutines
     }
