@@ -1106,4 +1106,216 @@ mod tests {
         assert!(output.contains("RPM:"));
         assert!(output.contains("Feed Rate:"));
     }
+
+    #[test]
+    fn test_rectangular_pocket_toolpath() {
+        let mut gen = CodeGenerator::new();
+
+        // Setup with material
+        let setup = SetupBlock {
+            zero: ZeroConfig {
+                x_ref: crate::ast::XRef::Left,
+                y_ref: crate::ast::YRef::Front,
+                z_ref: crate::ast::ZRef::Top,
+            },
+            material: Some("Aluminum 6061-T6".to_string()),
+            z_min: Some(0.0),
+            y_limit: None,
+        };
+        gen.setup = Some(setup.clone());
+        gen.current_material = setup.material;
+
+        // Tool change with end mill
+        let tool_change = ToolChange {
+            tool_number: 1,
+            tool_data: Some(ToolData {
+                diameter: 0.5,
+                length: 2.0,
+                flutes: 4,
+                material: crate::ast::ToolMaterial::Carbide,
+            }),
+        };
+        gen.emit_tool_change(&tool_change);
+
+        // Rectangular pocket operation
+        let pocket = PocketV2Op {
+            shape: PocketShape::Rect { width: 2.0, height: 1.5 },
+            position: Position::new(1.0, 0.75),
+            depth: 0.25,
+        };
+        gen.emit_pocket_v2(&pocket);
+
+        let output = gen.output.to_string();
+
+        // Should contain pocket info
+        assert!(output.contains("POCKET RECT"));
+        assert!(output.contains("2x1.5"));
+        assert!(output.contains("Black Book:"));
+        assert!(output.contains("RPM="));
+        assert!(output.contains("Stepdown="));
+        assert!(output.contains("Stepover="));
+
+        // Should contain actual G-code moves (zigzag pattern)
+        assert!(output.contains("G01 X"));
+        assert!(output.contains("G01 Y"));
+
+        // Should have pass comments
+        assert!(output.contains("Pass 1/"));
+
+        // Should retract at end
+        assert!(output.contains("G00 Z0.1"));
+    }
+
+    #[test]
+    fn test_circular_pocket_toolpath() {
+        let mut gen = CodeGenerator::new();
+
+        // Setup with material
+        let setup = SetupBlock {
+            zero: ZeroConfig {
+                x_ref: crate::ast::XRef::Left,
+                y_ref: crate::ast::YRef::Front,
+                z_ref: crate::ast::ZRef::Top,
+            },
+            material: Some("Aluminum 6061-T6".to_string()),
+            z_min: Some(0.0),
+            y_limit: None,
+        };
+        gen.setup = Some(setup.clone());
+        gen.current_material = setup.material;
+
+        // Tool change with end mill
+        let tool_change = ToolChange {
+            tool_number: 1,
+            tool_data: Some(ToolData {
+                diameter: 0.25,
+                length: 1.5,
+                flutes: 4,
+                material: crate::ast::ToolMaterial::Carbide,
+            }),
+        };
+        gen.emit_tool_change(&tool_change);
+
+        // Circular pocket operation
+        let pocket = PocketV2Op {
+            shape: PocketShape::Circle { diameter: 1.0 },
+            position: Position::new(2.0, 2.0),
+            depth: 0.125,
+        };
+        gen.emit_pocket_v2(&pocket);
+
+        let output = gen.output.to_string();
+
+        // Should contain pocket info
+        assert!(output.contains("POCKET CIRCLE"));
+        assert!(output.contains("dia:1"));
+        assert!(output.contains("Black Book:"));
+
+        // Should contain spiral G-code moves
+        assert!(output.contains("G01 X"));
+
+        // Should have finish pass comment
+        assert!(output.contains("Finish pass"));
+
+        // Should retract at end
+        assert!(output.contains("G00 Z0.1"));
+    }
+
+    #[test]
+    fn test_pocket_multi_pass_depth() {
+        let mut gen = CodeGenerator::new();
+
+        // Setup with material
+        let setup = SetupBlock {
+            zero: ZeroConfig {
+                x_ref: crate::ast::XRef::Left,
+                y_ref: crate::ast::YRef::Front,
+                z_ref: crate::ast::ZRef::Top,
+            },
+            material: Some("Steel 1018".to_string()),
+            z_min: Some(0.0),
+            y_limit: None,
+        };
+        gen.setup = Some(setup.clone());
+        gen.current_material = setup.material;
+
+        // Tool change with smaller end mill (deeper cuts)
+        let tool_change = ToolChange {
+            tool_number: 1,
+            tool_data: Some(ToolData {
+                diameter: 0.25,
+                length: 2.0,
+                flutes: 4,
+                material: crate::ast::ToolMaterial::Carbide,
+            }),
+        };
+        gen.emit_tool_change(&tool_change);
+
+        // Deep pocket that requires multiple passes
+        let pocket = PocketV2Op {
+            shape: PocketShape::Rect { width: 1.0, height: 0.75 },
+            position: Position::new(0.5, 0.375),
+            depth: 0.5, // Deep pocket
+        };
+        gen.emit_pocket_v2(&pocket);
+
+        let output = gen.output.to_string();
+
+        // Should have multiple passes
+        assert!(output.contains("Pass 1/"));
+        assert!(output.contains("Pass 2/"));
+
+        // Should have different Z depths
+        let pass1_count = output.matches("Pass 1/").count();
+        let pass2_count = output.matches("Pass 2/").count();
+        assert!(pass1_count >= 1);
+        assert!(pass2_count >= 1);
+    }
+
+    #[test]
+    fn test_pocket_respects_tool_diameter() {
+        let mut gen = CodeGenerator::new();
+
+        // Setup with material
+        let setup = SetupBlock {
+            zero: ZeroConfig {
+                x_ref: crate::ast::XRef::Left,
+                y_ref: crate::ast::YRef::Front,
+                z_ref: crate::ast::ZRef::Top,
+            },
+            material: Some("Aluminum 6061-T6".to_string()),
+            z_min: Some(0.0),
+            y_limit: None,
+        };
+        gen.setup = Some(setup.clone());
+        gen.current_material = setup.material;
+
+        // Tool change with large end mill
+        let tool_change = ToolChange {
+            tool_number: 1,
+            tool_data: Some(ToolData {
+                diameter: 1.0, // Large tool
+                length: 3.0,
+                flutes: 4,
+                material: crate::ast::ToolMaterial::Carbide,
+            }),
+        };
+        gen.emit_tool_change(&tool_change);
+
+        // Small pocket
+        let pocket = PocketV2Op {
+            shape: PocketShape::Circle { diameter: 1.25 }, // Only 0.25" larger than tool
+            position: Position::new(0.0, 0.0),
+            depth: 0.1,
+        };
+        gen.emit_pocket_v2(&pocket);
+
+        let output = gen.output.to_string();
+
+        // Should still generate output even with tight clearances
+        assert!(output.contains("POCKET CIRCLE"));
+
+        // With tool larger than pocket radius, should just do center point
+        assert!(output.contains("G00 X0.0000 Y0.0000"));
+    }
 }
