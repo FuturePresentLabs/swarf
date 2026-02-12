@@ -67,8 +67,10 @@ fn main() {
                 let file_arg = args
                     .iter()
                     .skip(2)
-                    .filter(|a| !a.starts_with("--"))
-                    .filter(|a| {
+                    .find(|a| {
+                        if a.starts_with("--") {
+                            return false;
+                        }
                         // Skip the value after --png
                         if let Some(png_idx) = args.iter().position(|x| x == "--png") {
                             if args.get(png_idx + 1) == Some(a) {
@@ -77,7 +79,6 @@ fn main() {
                         }
                         true
                     })
-                    .next()
                     .cloned();
 
                 let file_arg = match file_arg {

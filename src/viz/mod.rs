@@ -45,7 +45,20 @@ struct Bounds {
     max_z: f64,
 }
 
-pub async fn runviz(gcode_file: String, use_2d: bool) {
+/// Run visualizer with auto-compilation support for DSL files
+pub async fn runviz(file_path: String, use_2d: bool) {
+    // Check if this is a DSL file or G-code file
+    let is_dsl = file_path.ends_with(".dsl");
+
+    if is_dsl {
+        runviz_dsl(file_path, use_2d).await;
+    } else {
+        runviz_gcode(file_path, use_2d).await;
+    }
+}
+
+/// Run visualizer for G-code files (original behavior)
+async fn runviz_gcode(gcode_file: String, use_2d: bool) {
     let file_path = Arc::new(gcode_file);
     let toolpath = Arc::new(RwLock::new(parse_gcode(&file_path)));
 
@@ -127,6 +140,152 @@ pub async fn runviz(gcode_file: String, use_2d: bool) {
 
     println!("🚀 swarf-viz running at http://localhost:3030");
     println!("📁 Watching: {}", file_path);
+
+    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+}
+
+/// Run visualizer for DSL files with auto-compilation
+async fn runviz_dsl(dsl_file: String, use_2d: bool) {
+    use crate::codegen::CodeGenerator;
+    use crate::lexer;
+    use crate::parser;
+
+    // Create temp G-code file path
+    let temp_gcode_path = format!("{}.viz.nc", dsl_file);
+
+    // Compile DSL to G-code
+    fn compile_dsl_to_gcode(dsl_path: &str) -> Result<String, String> {
+        let source = std::fs::read_to_string(dsl_path).map_err(|e| e.to_string())?;
+        let tokens = lexer::lex(&source);
+        let mut parser = parser::Parser::new(tokens);
+        let program = parser.parse().map_err(|e| e.to_string())?;
+
+        let mut codegen = CodeGenerator::new();
+        let gcode_output = codegen.generate_output(&program);
+        let gcode = gcode_output.to_string();
+
+        Ok(gcode)
+    }
+
+    // Initial compile
+    match compile_dsl_to_gcode(&dsl_file) {
+        Ok(gcode) => {
+            if let Err(e) = std::fs::write(&temp_gcode_path, gcode) {
+                eprintln!("Failed to write temp G-code: {}", e);
+                return;
+            }
+            println!("✓ Compiled {} -> {}", dsl_file, temp_gcode_path);
+        }
+        Err(e) => {
+            eprintln!("❌ Compilation error: {}", e);
+            // Continue anyway - user might fix it
+        }
+    }
+
+    let gcode_path = Arc::new(temp_gcode_path.clone());
+    let dsl_path = Arc::new(dsl_file.clone());
+    let toolpath = Arc::new(RwLock::new(parse_gcode(&temp_gcode_path)));
+
+    let (tx, _rx) = broadcast::channel(100);
+    let tx = Arc::new(tx);
+
+    // Determine view mode
+    let view_mode = if use_2d { "2D" } else { "3D" };
+
+    // Use 3D viz if available and not forced to 2D
+    #[cfg(feature = "viz-3d")]
+    let html = if !use_2d {
+        INDEX_HTML_3D.to_string()
+    } else {
+        INDEX_HTML.replace("{{MODE}}", view_mode)
+    };
+
+    #[cfg(not(feature = "viz-3d"))]
+    let html = INDEX_HTML.replace("{{MODE}}", view_mode);
+
+    // File watcher for DSL file
+    let watch_dsl_path = dsl_path.clone();
+    let watch_gcode_path = gcode_path.clone();
+    let watch_toolpath = toolpath.clone();
+    let watch_tx = tx.clone();
+
+    tokio::spawn(async move {
+        let (watcher_tx, mut watcher_rx) = tokio::sync::mpsc::channel(10);
+
+        let mut watcher = RecommendedWatcher::new(
+            move |res: Result<Event, notify::Error>| {
+                let _ = watcher_tx.blocking_send(res);
+            },
+            Config::default(),
+        )
+        .unwrap();
+
+        watcher
+            .watch(Path::new(&*watch_dsl_path), RecursiveMode::NonRecursive)
+            .unwrap();
+
+        while let Some(res) = watcher_rx.recv().await {
+            match res {
+                Ok(_event) => {
+                    // Debounce
+                    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+                    // Recompile DSL
+                    println!("🔄 DSL changed, recompiling...");
+
+                    match compile_dsl_to_gcode(&watch_dsl_path) {
+                        Ok(gcode) => {
+                            if let Err(e) = std::fs::write(&*watch_gcode_path, gcode) {
+                                eprintln!("❌ Failed to write temp G-code: {}", e);
+                                continue;
+                            }
+                            println!("✓ Recompiled successfully");
+
+                            // Reparse and update
+                            let new_toolpath = parse_gcode(&watch_gcode_path);
+                            let mut tp = watch_toolpath.write().await;
+                            *tp = new_toolpath.clone();
+                            drop(tp);
+
+                            // Notify clients
+                            let json = serde_json::to_string(&new_toolpath).unwrap();
+                            let _ = watch_tx.send(json);
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Compilation error: {}", e);
+                            // Don't update visualization on error - keep showing last good state
+                        }
+                    }
+                }
+                Err(e) => eprintln!("Watch error: {:?}", e),
+            }
+        }
+
+        // Cleanup temp file when done
+        let _ = std::fs::remove_file(&*watch_gcode_path);
+    });
+
+    // WebSocket route
+    let toolpath_ws = toolpath.clone();
+    let tx_ws = tx.clone();
+
+    let ws_route = warp::path("ws")
+        .and(warp::ws())
+        .map(move |ws: warp::ws::Ws| {
+            let tp = toolpath_ws.clone();
+            let tx = tx_ws.clone();
+
+            ws.on_upgrade(move |websocket| handle_websocket(websocket, tp, tx))
+        });
+
+    // Static files
+    let index = warp::path::end().map(move || warp::reply::html(html.clone()));
+
+    let routes = ws_route.or(index);
+
+    println!("🚀 swarf-viz running at http://localhost:3030");
+    println!("📁 Watching DSL: {}", dsl_file);
+    println!("💡 Edit the DSL file and save to see changes instantly");
 
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }
@@ -282,7 +441,7 @@ fn parse_coord(line: &str, coord: char) -> Option<f64> {
         let num_str: String = rest
             .chars()
             .skip_while(|c| c.is_whitespace())
-            .take_while(|c| c.is_digit(10) || *c == '.' || *c == '-')
+            .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
             .collect();
         return num_str.parse::<f64>().ok();
     }
@@ -491,7 +650,7 @@ pub fn export_to_png(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use image::{Rgb, RgbImage};
 
-    let toolpath = parse_gcode(&gcode_file.to_string());
+    let toolpath = parse_gcode(gcode_file);
 
     // Create image buffer with dark background
     let mut img = RgbImage::from_pixel(width, height, Rgb([26, 26, 26]));
