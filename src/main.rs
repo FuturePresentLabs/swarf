@@ -48,9 +48,15 @@ fn main() {
             #[cfg(feature = "viz")]
             {
                 if args.len() < 3 {
-                    eprintln!("Usage: swarf --viz [--2d] [--png <output.png>] <gcode-file.nc>");
+                    eprintln!("Usage: swarf --viz [--2d] [--png <output.png>] <path>");
+                    eprintln!("  <path>        G-code file (.nc), swarf file (.swarf), or folder");
                     eprintln!("  --2d          Use 2D canvas view (default is 3D if available)");
                     eprintln!("  --png <file>  Export to PNG file instead of starting server");
+                    eprintln!();
+                    eprintln!("Examples:");
+                    eprintln!("  swarf --viz output.nc           # View G-code");
+                    eprintln!("  swarf --viz part.swarf          # View swarf file with live reload");
+                    eprintln!("  swarf --viz examples/           # Browse all .swarf files in folder");
                     std::process::exit(1);
                 }
 
@@ -195,10 +201,10 @@ fn print_usage() {
     println!("swarf - Natural language to G-code compiler");
     println!();
     println!("Usage:");
-    println!("  swarf <input.dsl> [output.nc]          Compile DSL to G-code");
-    println!("  swarf <input.dsl> --post <type>        Use post-processor");
-    println!("  swarf <input.dsl> --max-rpm <rpm>      Limit spindle RPM (scales feed)");
-    println!("  swarf --viz <file.nc>                  Start visualizer on http://localhost:3030");
+    println!("  swarf <input.swarf> [output.nc]        Compile swarf to G-code");
+    println!("  swarf <input.swarf> --post <type>      Use post-processor");
+    println!("  swarf <input.swarf> --max-rpm <rpm>    Limit spindle RPM (scales feed)");
+    println!("  swarf --viz <path>                     Start visualizer on http://localhost:3030");
     println!("  swarf --list-posts                     List available post-processors");
     println!("  swarf --help                           Show this help");
     println!();
@@ -208,12 +214,17 @@ fn print_usage() {
     println!("  linuxcnc  - LinuxCNC");
     println!("  haas      - Haas");
     println!();
+    println!("Visualizer:");
+    println!("  swarf --viz output.nc                  View G-code file");
+    println!("  swarf --viz part.swarf                 View swarf file (live reload)");
+    println!("  swarf --viz examples/                  Browse folder of .swarf files");
+    println!();
     println!("Examples:");
-    println!("  swarf program.dsl output.nc");
-    println!("  swarf program.dsl --post mach3 -o output.nc");
-    println!("  swarf program.dsl --max-rpm 10000 -o output.nc");
-    println!("  swarf examples/bracket.dsl");
-    println!("  swarf --viz output.nc");
+    println!("  swarf program.swarf output.nc");
+    println!("  swarf program.swarf --post mach3 -o output.nc");
+    println!("  swarf program.swarf --max-rpm 10000 -o output.nc");
+    println!("  swarf examples/bracket.swarf");
+    println!("  swarf --viz examples/");
 }
 
 fn compile(input_path: &str, output_path: &str) -> Result<(), Error> {

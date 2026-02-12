@@ -45,13 +45,19 @@ struct Bounds {
     max_z: f64,
 }
 
-/// Run visualizer with auto-compilation support for DSL files
+/// Run visualizer with auto-compilation support for swarf files
 pub async fn runviz(file_path: String, use_2d: bool) {
-    // Check if this is a DSL file or G-code file
-    let is_dsl = file_path.ends_with(".dsl");
+    // Check if path is a directory (folder mode)
+    if std::path::Path::new(&file_path).is_dir() {
+        runviz_folder(file_path, use_2d).await;
+        return;
+    }
 
-    if is_dsl {
-        runviz_dsl(file_path, use_2d).await;
+    // Check if this is a swarf file or G-code file
+    let is_swarf = file_path.ends_with(".swarf");
+
+    if is_swarf {
+        runviz_swarf(file_path, use_2d).await;
     } else {
         runviz_gcode(file_path, use_2d).await;
     }
@@ -144,18 +150,18 @@ async fn runviz_gcode(gcode_file: String, use_2d: bool) {
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }
 
-/// Run visualizer for DSL files with auto-compilation
-async fn runviz_dsl(dsl_file: String, use_2d: bool) {
+/// Run visualizer for swarf files with auto-compilation
+async fn runviz_swarf(swarf_file: String, use_2d: bool) {
     use crate::codegen::CodeGenerator;
     use crate::lexer;
     use crate::parser;
 
     // Create temp G-code file path
-    let temp_gcode_path = format!("{}.viz.nc", dsl_file);
+    let temp_gcode_path = format!("{}.viz.nc", swarf_file);
 
-    // Compile DSL to G-code
-    fn compile_dsl_to_gcode(dsl_path: &str) -> Result<String, String> {
-        let source = std::fs::read_to_string(dsl_path).map_err(|e| e.to_string())?;
+    // Compile swarf to G-code
+    fn compile_swarf_to_gcode(swarf_path: &str) -> Result<String, String> {
+        let source = std::fs::read_to_string(swarf_path).map_err(|e| e.to_string())?;
         let tokens = lexer::lex(&source);
         let mut parser = parser::Parser::new(tokens);
         let program = parser.parse().map_err(|e| e.to_string())?;
@@ -168,13 +174,13 @@ async fn runviz_dsl(dsl_file: String, use_2d: bool) {
     }
 
     // Initial compile
-    match compile_dsl_to_gcode(&dsl_file) {
+    match compile_swarf_to_gcode(&swarf_file) {
         Ok(gcode) => {
             if let Err(e) = std::fs::write(&temp_gcode_path, gcode) {
                 eprintln!("Failed to write temp G-code: {}", e);
                 return;
             }
-            println!("✓ Compiled {} -> {}", dsl_file, temp_gcode_path);
+            println!("✓ Compiled {} -> {}", swarf_file, temp_gcode_path);
         }
         Err(e) => {
             eprintln!("❌ Compilation error: {}", e);
@@ -183,7 +189,7 @@ async fn runviz_dsl(dsl_file: String, use_2d: bool) {
     }
 
     let gcode_path = Arc::new(temp_gcode_path.clone());
-    let dsl_path = Arc::new(dsl_file.clone());
+    let swarf_path = Arc::new(swarf_file.clone());
     let toolpath = Arc::new(RwLock::new(parse_gcode(&temp_gcode_path)));
 
     let (tx, _rx) = broadcast::channel(100);
@@ -203,8 +209,8 @@ async fn runviz_dsl(dsl_file: String, use_2d: bool) {
     #[cfg(not(feature = "viz-3d"))]
     let html = INDEX_HTML.replace("{{MODE}}", view_mode);
 
-    // File watcher for DSL file
-    let watch_dsl_path = dsl_path.clone();
+    // File watcher for swarf file
+    let watch_swarf_path = swarf_path.clone();
     let watch_gcode_path = gcode_path.clone();
     let watch_toolpath = toolpath.clone();
     let watch_tx = tx.clone();
@@ -221,7 +227,7 @@ async fn runviz_dsl(dsl_file: String, use_2d: bool) {
         .unwrap();
 
         watcher
-            .watch(Path::new(&*watch_dsl_path), RecursiveMode::NonRecursive)
+            .watch(Path::new(&*watch_swarf_path), RecursiveMode::NonRecursive)
             .unwrap();
 
         while let Some(res) = watcher_rx.recv().await {
@@ -230,10 +236,10 @@ async fn runviz_dsl(dsl_file: String, use_2d: bool) {
                     // Debounce
                     tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
-                    // Recompile DSL
-                    println!("🔄 DSL changed, recompiling...");
+                    // Recompile swarf
+                    println!("🔄 swarf changed, recompiling...");
 
-                    match compile_dsl_to_gcode(&watch_dsl_path) {
+                    match compile_swarf_to_gcode(&watch_swarf_path) {
                         Ok(gcode) => {
                             if let Err(e) = std::fs::write(&*watch_gcode_path, gcode) {
                                 eprintln!("❌ Failed to write temp G-code: {}", e);
@@ -284,10 +290,142 @@ async fn runviz_dsl(dsl_file: String, use_2d: bool) {
     let routes = ws_route.or(index);
 
     println!("🚀 swarf-viz running at http://localhost:3030");
-    println!("📁 Watching DSL: {}", dsl_file);
-    println!("💡 Edit the DSL file and save to see changes instantly");
+    println!("📁 Watching swarf: {}", swarf_file);
+    println!("💡 Edit the swarf file and save to see changes instantly");
 
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+}
+
+/// Run visualizer in folder mode - shows file selector
+async fn runviz_folder(folder_path: String, _use_2d: bool) {
+
+    // Scan folder for .swarf files
+    fn scan_swarf_files(folder: &str) -> Vec<String> {
+        let mut files = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(folder) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name.ends_with(".swarf") {
+                        files.push(name.to_string());
+                    }
+                }
+            }
+        }
+        files.sort();
+        files
+    }
+
+    let swarf_files = scan_swarf_files(&folder_path);
+
+    if swarf_files.is_empty() {
+        eprintln!("No .swarf files found in {}", folder_path);
+        eprintln!("Create some swarf files first!");
+        std::process::exit(1);
+    }
+
+    println!("📁 Found {} swarf file(s) in {}", swarf_files.len(), folder_path);
+    for (i, f) in swarf_files.iter().enumerate() {
+        println!("  {}. {}", i + 1, f);
+    }
+
+    // Shared state
+    let current_file = Arc::new(RwLock::new(swarf_files[0].clone()));
+    let folder = Arc::new(folder_path.clone());
+
+    // Load initial toolpath
+    let initial_path = format!("{}/{}", folder_path, swarf_files[0]);
+    let toolpath = Arc::new(RwLock::new(load_swarf_file(&initial_path)));
+
+    let (tx, _rx) = broadcast::channel(100);
+    let tx = Arc::new(tx);
+
+    // Generate HTML with file selector
+    let file_list_json = serde_json::to_string(&swarf_files).unwrap();
+    let html = FOLDER_HTML
+        .replace("{{FILE_LIST}}", &file_list_json)
+        .replace("{{FOLDER}}", &folder_path);
+
+    // API routes
+    let toolpath_api = toolpath.clone();
+    let current_file_api = current_file.clone();
+    let folder_api = folder.clone();
+
+    let load_route = warp::path("load")
+        .and(warp::query::<std::collections::HashMap<String, String>>())
+        .map(move |params: std::collections::HashMap<String, String>| {
+            if let Some(filename) = params.get("file") {
+                // Validate filename (prevent directory traversal)
+                if !filename.ends_with(".swarf") || filename.contains("..") {
+                    return warp::reply::json(&serde_json::json!({
+                        "error": "Invalid filename"
+                    }));
+                }
+
+                let full_path = format!("{}/{}", *folder_api, filename);
+                let new_toolpath = load_swarf_file(&full_path);
+
+                // Update shared state
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async {
+                    let mut tp = toolpath_api.write().await;
+                    *tp = new_toolpath.clone();
+                    let mut cf = current_file_api.write().await;
+                    *cf = filename.clone();
+                });
+
+                return warp::reply::json(&serde_json::json!({
+                    "success": true,
+                    "file": filename,
+                    "toolpath": new_toolpath
+                }));
+            }
+            warp::reply::json(&serde_json::json!({"error": "No file specified"}))
+        });
+
+    let toolpath_ws = toolpath.clone();
+    let tx_ws = tx.clone();
+
+    let ws_route = warp::path("ws")
+        .and(warp::ws())
+        .map(move |ws: warp::ws::Ws| {
+            let tp = toolpath_ws.clone();
+            let tx = tx_ws.clone();
+            ws.on_upgrade(move |websocket| handle_websocket(websocket, tp, tx))
+        });
+
+    let index = warp::path::end().map(move || warp::reply::html(html.clone()));
+    let routes = ws_route.or(load_route).or(index);
+
+    println!("🚀 swarf-viz folder mode at http://localhost:3030");
+    println!("💡 Click any file in the browser to view it");
+
+    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+}
+
+/// Load and compile a swarf file, return toolpath
+fn load_swarf_file(path: &str) -> Toolpath {
+    use crate::codegen::CodeGenerator;
+    use crate::lexer;
+    use crate::parser;
+
+    // Try to compile swarf first
+    if path.ends_with(".swarf") {
+        if let Ok(source) = std::fs::read_to_string(path) {
+            let tokens = lexer::lex(&source);
+            let mut parser = parser::Parser::new(tokens);
+            if let Ok(program) = parser.parse() {
+                let mut codegen = CodeGenerator::new();
+                let gcode_output = codegen.generate_output(&program);
+                let gcode = gcode_output.to_string();
+
+                // Parse the generated G-code
+                return parse_gcode_string(&gcode);
+            }
+        }
+    }
+
+    // Fallback to parsing as G-code directly
+    parse_gcode(path)
 }
 
 use futures::{SinkExt, StreamExt};
@@ -330,7 +468,14 @@ async fn handle_websocket(
 
 fn parse_gcode(path: &str) -> Toolpath {
     let content = std::fs::read_to_string(path).unwrap_or_default();
+    parse_gcode_content(&content)
+}
 
+fn parse_gcode_string(content: &str) -> Toolpath {
+    parse_gcode_content(content)
+}
+
+fn parse_gcode_content(content: &str) -> Toolpath {
     let mut lines: Vec<Line> = Vec::new();
     let mut rapids: Vec<Line> = Vec::new();
     let arcs: Vec<ArcMove> = Vec::new();
@@ -638,6 +783,305 @@ static INDEX_HTML_3D: &str = r#"<!DOCTYPE html>
             <canvas id="viz-canvas"></canvas>
         </div>
     </div>
+</body>
+</html>"#;
+
+static FOLDER_HTML: &str = r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>swarf viz | Folder</title>
+    <style>
+        body {
+            margin: 0;
+            background: #1a1a1a;
+            font-family: system-ui, -apple-system, sans-serif;
+            color: #fff;
+            height: 100vh;
+            display: flex;
+        }
+        #sidebar {
+            width: 280px;
+            background: #222;
+            border-right: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+        }
+        #sidebar header {
+            padding: 20px;
+            border-bottom: 1px solid #333;
+        }
+        #sidebar h1 {
+            margin: 0 0 5px 0;
+            font-size: 20px;
+            color: #ffaa00;
+        }
+        #sidebar .folder {
+            font-size: 12px;
+            color: #888;
+            word-break: break-all;
+        }
+        #file-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .file-item {
+            padding: 12px 15px;
+            margin-bottom: 5px;
+            background: #2a2a2a;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .file-item:hover {
+            background: #333;
+        }
+        .file-item.active {
+            background: #ffaa00;
+            color: #000;
+        }
+        .file-item::before {
+            content: "◉";
+            font-size: 10px;
+            opacity: 0.5;
+        }
+        .file-item.active::before {
+            opacity: 1;
+        }
+        #main {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+        #canvas {
+            width: 100%;
+            height: 100%;
+        }
+        #info {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 12px;
+            pointer-events: none;
+        }
+        #status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            padding: 8px 15px;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #4f4;
+        }
+        #status.loading {
+            color: #fa0;
+        }
+        #status.error {
+            color: #f44;
+        }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <header>
+            <h1>swarf viz</h1>
+            <div class="folder">{{FOLDER}}</div>
+        </header>
+        <div id="file-list"></div>
+    </div>
+    <div id="main">
+        <canvas id="canvas"></canvas>
+        <div id="status">● Ready</div>
+        <div id="info">
+            <strong id="filename">Select a file</strong><br>
+            <span id="bounds">--</span><br>
+            <span id="stats">--</span>
+        </div>
+    </div>
+
+    <script>
+        const files = {{FILE_LIST}};
+        let currentFile = files[0];
+        let toolpath = { lines: [], rapids: [], bounds: { min_x: 0, max_x: 100, min_y: 0, max_y: 100 } };
+        let ws = null;
+        let scale = 1, offsetX = 0, offsetY = 0;
+        let isDragging = false, lastX = 0, lastY = 0;
+
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const fileList = document.getElementById('file-list');
+        const status = document.getElementById('status');
+        const filenameEl = document.getElementById('filename');
+        const boundsEl = document.getElementById('bounds');
+        const statsEl = document.getElementById('stats');
+
+        function renderFileList() {
+            fileList.innerHTML = '';
+            files.forEach(f => {
+                const div = document.createElement('div');
+                div.className = 'file-item' + (f === currentFile ? ' active' : '');
+                div.textContent = f;
+                div.onclick = () => loadFile(f);
+                fileList.appendChild(div);
+            });
+        }
+
+        async function loadFile(filename) {
+            currentFile = filename;
+            renderFileList();
+            status.textContent = '● Loading...';
+            status.className = 'loading';
+
+            try {
+                const res = await fetch(`/load?file=${encodeURIComponent(filename)}`);
+                const data = await res.json();
+
+                if (data.error) {
+                    status.textContent = '● Error';
+                    status.className = 'error';
+                    console.error(data.error);
+                    return;
+                }
+
+                toolpath = data.toolpath;
+                filenameEl.textContent = filename;
+                updateInfo();
+                fitToView();
+                draw();
+
+                status.textContent = '● Loaded';
+                status.className = '';
+            } catch (e) {
+                status.textContent = '● Error';
+                status.className = 'error';
+                console.error(e);
+            }
+        }
+
+        function updateInfo() {
+            const b = toolpath.bounds;
+            boundsEl.textContent = `X: ${b.min_x.toFixed(3)} to ${b.max_x.toFixed(3)} | Y: ${b.min_y.toFixed(3)} to ${b.max_y.toFixed(3)}`;
+            const totalLines = toolpath.lines.length + toolpath.rapids.length;
+            statsEl.textContent = `${totalLines} moves | ${toolpath.lines.length} cuts | ${toolpath.rapids.length} rapids`;
+        }
+
+        function resize() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+            draw();
+        }
+
+        function worldToScreen(x, y) {
+            return {
+                x: (x - toolpath.bounds.min_x) * scale + offsetX,
+                y: canvas.height - ((y - toolpath.bounds.min_y) * scale + offsetY)
+            };
+        }
+
+        function fitToView() {
+            const padding = 50;
+            const w = toolpath.bounds.max_x - toolpath.bounds.min_x;
+            const h = toolpath.bounds.max_y - toolpath.bounds.min_y;
+            if (w > 0 && h > 0) {
+                const scaleX = (canvas.width - padding * 2) / w;
+                const scaleY = (canvas.height - padding * 2) / h;
+                scale = Math.min(scaleX, scaleY);
+                offsetX = padding;
+                offsetY = padding;
+            }
+            draw();
+        }
+
+        function draw() {
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Grid
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for (let i = 0; i < 20; i++) {
+                const x = (i / 20) * canvas.width;
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                const y = (i / 20) * canvas.height;
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+            }
+            ctx.stroke();
+
+            // Rapids (grey)
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            toolpath.rapids.forEach(line => {
+                const p1 = worldToScreen(line.x1, line.y1);
+                const p2 = worldToScreen(line.x2, line.y2);
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+            });
+            ctx.stroke();
+
+            // Cuts (amber)
+            ctx.strokeStyle = '#ffaa00';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            toolpath.lines.forEach(line => {
+                const p1 = worldToScreen(line.x1, line.y1);
+                const p2 = worldToScreen(line.x2, line.y2);
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+            });
+            ctx.stroke();
+
+            // Start point (green)
+            if (toolpath.rapids.length > 0) {
+                const start = worldToScreen(toolpath.rapids[0].x1, toolpath.rapids[0].y1);
+                ctx.fillStyle = '#0f0';
+                ctx.beginPath();
+                ctx.arc(start.x, start.y, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Mouse controls
+        canvas.addEventListener('mousedown', e => {
+            isDragging = true;
+            lastX = e.clientX;
+            lastY = e.clientY;
+        });
+        canvas.addEventListener('mousemove', e => {
+            if (isDragging) {
+                offsetX += e.clientX - lastX;
+                offsetY -= e.clientY - lastY;
+                lastX = e.clientX;
+                lastY = e.clientY;
+                draw();
+            }
+        });
+        canvas.addEventListener('mouseup', () => isDragging = false);
+        canvas.addEventListener('wheel', e => {
+            e.preventDefault();
+            const factor = e.deltaY > 0 ? 0.9 : 1.1;
+            scale *= factor;
+            draw();
+        });
+
+        window.addEventListener('resize', resize);
+
+        // Init
+        renderFileList();
+        resize();
+        loadFile(files[0]);
+    </script>
 </body>
 </html>"#;
 

@@ -12,9 +12,9 @@ Natural language → DSL → Validated G-code for CNC machining.
 
 Writing G-code by hand is tedious and error-prone. CAM software is powerful but slow for simple operations. **swarf** hits the sweet spot: fast to write, easy to read, and generates verifiable output.
 
-```dsl
+```swarf
 ; Face the stock
-stock 4x3x0.75 Aluminum 6061-T6
+stock 4 x 3 x 0.75 Aluminum 6061-T6
 tool 1 dia 1.0 flutes 4 carbide
 face at stock depth 0.05
 
@@ -23,7 +23,7 @@ drill 0.25 at 1.0 0.5 thru
 drill 0.25 at 3.0 0.5 thru
 
 ; Pocket the center
-pocket 2.0 1.5 0.25 at 2.0 1.0
+pocket rect 2.0 1.5 0.25 at 2.0 1.0
 ```
 
 ## Quick Start
@@ -35,15 +35,18 @@ cd swarf
 cargo build --release
 
 # Compile a program
-./target/release/swarf examples/bracket.dsl output.nc
+./target/release/swarf examples/bracket.swarf output.nc
 
 # With specific post-processor
-./target/release/swarf program.dsl --post mach3 -o output.nc
+./target/release/swarf program.swarf --post mach3 -o output.nc
 
 # Visualize (with viz feature)
 cargo build --release --features viz
 ./target/release/swarf --viz output.nc
 # Opens http://localhost:3030 with live-reloading toolpath preview
+
+# Browse folder of swarf files
+./target/release/swarf --viz examples/
 
 # List available post-processors
 ./target/release/swarf --list-posts
