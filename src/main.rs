@@ -159,8 +159,13 @@ fn main() {
                         }
                     }
                     arg => {
-                        if input_path.is_none() && !arg.starts_with('-') {
-                            input_path = Some(arg);
+                        if !arg.starts_with('-') {
+                            if input_path.is_none() {
+                                input_path = Some(arg);
+                            } else if output_path == "output.nc" {
+                                // Second positional argument is output path
+                                output_path = arg;
+                            }
                         }
                         i += 1;
                     }
