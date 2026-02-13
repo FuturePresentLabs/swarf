@@ -298,6 +298,31 @@ pub enum Token {
     #[token("material")]
     Material,
 
+    // Pattern keywords
+    #[token("pattern")]
+    Pattern,
+
+    #[token("spacing")]
+    Spacing,
+
+    #[token("starting")]
+    Starting,
+
+    #[token("rows")]
+    Rows,
+
+    #[token("cols")]
+    Cols,
+
+    #[token("count")]
+    Count,
+
+    #[token("line")]
+    Line,
+
+    #[token("arc")]
+    Arc,
+
     // Identifier for part names without quotes
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_-]*", |lex| lex.slice().to_string(), priority = 1)]
     Identifier(String),

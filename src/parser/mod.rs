@@ -149,7 +149,12 @@ impl Parser {
                     // v2: drill <dia> at ...
                     // v1: drill at ...
                     if self.is_drill_v2() {
-                        Operation::DrillV2(self.parse_drill_v2()?)
+                        // Check if followed by pattern
+                        if self.has_pattern_after_drill() {
+                            Operation::DrillPattern(self.parse_drill_pattern()?)
+                        } else {
+                            Operation::DrillV2(self.parse_drill_v2()?)
+                        }
                     } else {
                         self.parse_drill()?
                     }
@@ -157,7 +162,12 @@ impl Parser {
                 Some(Token::Pocket) => {
                     // Check if v2 syntax
                     if self.is_pocket_v2() {
-                        Operation::PocketV2(self.parse_pocket_v2()?)
+                        // Check if followed by pattern
+                        if self.has_pattern_after_pocket() {
+                            Operation::PocketPattern(self.parse_pocket_pattern()?)
+                        } else {
+                            Operation::PocketV2(self.parse_pocket_v2()?)
+                        }
                     } else {
                         self.parse_pocket()?
                     }
@@ -243,6 +253,133 @@ impl Parser {
             }
         }
         false
+    }
+
+    fn has_pattern_after_drill(&self) -> bool {
+        // Look ahead for "pattern" keyword after drill v2 syntax
+        // drill <dia> at ... depth ... pattern ...
+        let mut pos = self.position + 1; // Skip 'drill'
+        // Skip diameter
+        if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Fraction(_), _))) {
+            pos += 1;
+        }
+        // Skip 'at' and position
+        if matches!(self.tokens.get(pos), Some((Token::At, _))) {
+            pos += 1;
+        }
+        // Skip position (1-2 tokens for zero/stock or numbers)
+        if matches!(self.tokens.get(pos), Some((Token::Identifier(_) | Token::Zero | Token::Stock, _))) {
+            pos += 1;
+        } else {
+            // Skip two numbers for x y
+            if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Fraction(_), _))) {
+                pos += 1;
+            }
+            if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Fraction(_), _))) {
+                pos += 1;
+            }
+        }
+        // Skip depth if present
+        if matches!(self.tokens.get(pos), Some((Token::Depth | Token::Thru, _))) {
+            pos += 1;
+            if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Fraction(_), _))) {
+                pos += 1;
+            }
+        }
+        // Check for pattern
+        matches!(self.tokens.get(pos), Some((Token::Pattern, _)))
+    }
+
+    fn has_pattern_after_pocket(&self) -> bool {
+        // Look ahead for "pattern" keyword after pocket v2 syntax
+        // pocket rect <w> <h> <d> at ... pattern ...
+        let mut pos = self.position + 1; // Skip 'pocket'
+        // Skip shape keyword if present
+        if matches!(self.tokens.get(pos), Some((Token::Rect | Token::Rectangle | Token::Circle, _))) {
+            pos += 1;
+        }
+        // Skip 3 numbers (width, height/depth, depth)
+        for _ in 0..3 {
+            if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Fraction(_), _))) {
+                pos += 1;
+            }
+        }
+        // Skip 'at' and position
+        if matches!(self.tokens.get(pos), Some((Token::At, _))) {
+            pos += 1;
+        }
+        // Skip position
+        if matches!(self.tokens.get(pos), Some((Token::Identifier(_) | Token::Zero | Token::Stock, _))) {
+            pos += 1;
+        } else {
+            if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Fraction(_), _))) {
+                pos += 1;
+            }
+            if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Fraction(_), _))) {
+                pos += 1;
+            }
+        }
+        // Check for pattern
+        matches!(self.tokens.get(pos), Some((Token::Pattern, _)))
+    }
+
+    fn parse_drill_pattern(&mut self) -> Result<DrillPatternOp> {
+        self.consume(Token::Drill)?;
+        let diameter = self.expect_number_or_fraction()?;
+
+        self.consume(Token::At)?;
+        let _position = self.parse_at_position()?; // Starting position (used for single, ignored for pattern)
+
+        let depth = if self.peek() == Some(&Token::Thru) {
+            self.advance();
+            DrillDepth::Thru
+        } else if self.peek() == Some(&Token::Depth) {
+            self.advance();
+            DrillDepth::Depth(self.expect_number_or_fraction()?)
+        } else {
+            DrillDepth::Thru // Default
+        };
+
+        let pattern = self.parse_pattern()?;
+
+        Ok(DrillPatternOp {
+            diameter,
+            depth,
+            pattern,
+        })
+    }
+
+    fn parse_pocket_pattern(&mut self) -> Result<PocketPatternOp> {
+        self.consume(Token::Pocket)?;
+
+        // Parse shape
+        let shape = if self.peek() == Some(&Token::Rect) || self.peek() == Some(&Token::Rectangle) {
+            self.advance();
+            let width = self.expect_number_or_fraction()?;
+            let height = self.expect_number_or_fraction()?;
+            PocketShape::Rect { width, height }
+        } else if self.peek() == Some(&Token::Circle) {
+            self.advance();
+            let diameter = self.expect_number_or_fraction()?;
+            PocketShape::Circle { diameter }
+        } else {
+            let width = self.expect_number_or_fraction()?;
+            let height = self.expect_number_or_fraction()?;
+            PocketShape::Rect { width, height }
+        };
+
+        let depth = self.expect_number_or_fraction()?;
+
+        self.consume(Token::At)?;
+        let _position = self.parse_at_position()?; // Starting position (used for single, ignored for pattern)
+
+        let pattern = self.parse_pattern()?;
+
+        Ok(PocketPatternOp {
+            shape,
+            depth,
+            pattern,
+        })
     }
 
     fn parse_tool_change(&mut self) -> Result<Operation> {
@@ -705,6 +842,10 @@ impl Parser {
         }
     }
 
+    fn check_identifier(&self, expected: &str) -> bool {
+        matches!(self.peek(), Some(Token::Identifier(s)) if s == expected)
+    }
+
     // ============================================
     // New DSL v2 parsing
     // ============================================
@@ -1055,6 +1196,160 @@ impl Parser {
                 Ok(Position::new(x, y))
             }
         }
+    }
+
+    fn parse_pattern(&mut self) -> Result<Pattern> {
+        self.consume(Token::Pattern)?;
+
+        // Check for pattern type
+        match self.peek() {
+            Some(Token::Grid) => self.parse_grid_pattern(),
+            Some(Token::Circle) => self.parse_bolt_circle_pattern(),
+            Some(Token::Identifier(s)) if s == "bolt" => {
+                self.advance(); // consume "bolt"
+                self.consume(Token::Circle)?;
+                self.parse_bolt_circle_pattern_contents()
+            }
+            Some(Token::Line) => self.parse_line_pattern(),
+            Some(Token::Arc) => self.parse_arc_pattern(),
+            _ => Err(self.error("expected pattern type: grid, circle, line, or arc")),
+        }
+    }
+
+    fn parse_grid_pattern(&mut self) -> Result<Pattern> {
+        self.consume(Token::Grid)?;
+
+        // Parse: grid <rows> x <cols> spacing <sx> <sy> starting at <x> <y>
+        // Or: grid <rows> <cols> spacing <sx> <sy> starting at <x> <y>
+        let rows = self.expect_number_or_fraction()? as u32;
+
+        // Optional 'x' or just second number
+        if self.peek() == Some(&Token::X) {
+            self.advance();
+        }
+
+        let cols = self.expect_number_or_fraction()? as u32;
+
+        self.consume(Token::Spacing)?;
+        let spacing_x = self.expect_number_or_fraction()?;
+        let spacing_y = self.expect_number_or_fraction()?;
+
+        self.consume(Token::Starting)?;
+        self.consume(Token::At)?;
+        let start_position = self.parse_at_position()?;
+
+        Ok(Pattern::Grid {
+            rows,
+            cols,
+            spacing_x,
+            spacing_y,
+            start_position,
+        })
+    }
+
+    fn parse_bolt_circle_pattern(&mut self) -> Result<Pattern> {
+        self.consume(Token::Circle)?;
+        self.parse_bolt_circle_pattern_contents()
+    }
+
+    fn parse_bolt_circle_pattern_contents(&mut self) -> Result<Pattern> {
+        // Parse: circle <count> dia <diameter> center at <x> <y>
+        let count = self.expect_number_or_fraction()? as u32;
+
+        self.consume(Token::Diameter)?;
+        let diameter = self.expect_number_or_fraction()?;
+
+        self.consume(Token::Center)?;
+        self.consume(Token::At)?;
+        let center = self.parse_at_position()?;
+
+        // Optional start angle (default 0)
+        let start_angle = if self.peek() == Some(&Token::Starting) {
+            self.advance();
+            self.consume(Token::At)?;
+            self.expect_number_or_fraction()?
+        } else {
+            0.0
+        };
+
+        Ok(Pattern::BoltCircle {
+            count,
+            diameter,
+            center,
+            start_angle,
+        })
+    }
+
+    fn parse_line_pattern(&mut self) -> Result<Pattern> {
+        self.consume(Token::Line)?;
+
+        // Parse: line <count> spacing <spacing> <direction> starting at <x> <y>
+        let count = self.expect_number_or_fraction()? as u32;
+
+        self.consume(Token::Spacing)?;
+        let spacing = self.expect_number_or_fraction()?;
+
+        // Parse direction
+        let direction = match self.peek() {
+            Some(Token::Direction(dir)) => {
+                let d = dir.clone();
+                self.advance();
+                match d.as_str() {
+                    "X+" => Direction::XPositive,
+                    "X-" => Direction::XNegative,
+                    "Y+" => Direction::YPositive,
+                    "Y-" => Direction::YNegative,
+                    _ => return Err(self.error("expected direction X+, X-, Y+, or Y-")),
+                }
+            }
+            _ => return Err(self.error("expected direction like X+, Y-")),
+        };
+
+        self.consume(Token::Starting)?;
+        self.consume(Token::At)?;
+        let start_position = self.parse_at_position()?;
+
+        Ok(Pattern::Line {
+            count,
+            spacing,
+            direction,
+            start_position,
+        })
+    }
+
+    fn parse_arc_pattern(&mut self) -> Result<Pattern> {
+        self.consume(Token::Arc)?;
+        
+        // Parse: arc <count> radius <radius> center at <x> <y> starting at <angle> to <angle>
+        let count = self.expect_number_or_fraction()? as u32;
+
+        self.consume(Token::Radius)?;
+        let radius = self.expect_number_or_fraction()?;
+
+        self.consume(Token::Center)?;
+        self.consume(Token::At)?;
+        let center = self.parse_at_position()?;
+
+        // Parse start angle - "starting at <angle>"
+        self.consume(Token::Starting)?;
+        self.consume(Token::At)?;
+        let start_angle = self.expect_number_or_fraction()?;
+
+        // Parse end angle - "to <angle>"
+        if self.check_identifier("to") {
+            self.advance();
+        } else {
+            return Err(self.error("expected 'to' followed by end angle"));
+        }
+        let end_angle = self.expect_number_or_fraction()?;
+
+        Ok(Pattern::Arc {
+            count,
+            radius,
+            center,
+            start_angle,
+            end_angle,
+        })
     }
 
     fn expect_number_or_fraction(&mut self) -> Result<f64> {

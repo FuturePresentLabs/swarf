@@ -1,0 +1,25 @@
+; Test pattern operations
+units imperial
+
+setup {
+    zero left front top
+    material "Aluminum 6061-T6"
+}
+
+tool 1 dia 0.25 length 2.0 flutes 2 hss
+
+; Grid pattern - 3x2 grid of holes
+drill 0.25 at 1.0 1.0 depth 0.25 pattern grid 3 x 2 spacing 1.5 1.0 starting at 1.0 1.0
+
+; Bolt circle pattern - 6 holes on a 2" diameter circle
+drill 0.25 at 0 0 depth 0.25 pattern circle 6 dia 2.0 center at 3.0 2.0
+
+; Line pattern - 5 holes in X direction
+drill 0.25 at 0 0 depth 0.25 pattern line 5 spacing 0.75 X+ starting at 0.5 0.5
+
+; Arc pattern - 4 holes on 90 degree arc
+drill 0.25 at 0 0 depth 0.25 pattern arc 4 radius 1.0 center at 5.0 1.0 starting at 0 to 90
+
+; Grid of pockets
+tool 2 dia 0.5 length 2.0 flutes 4 carbide
+pocket rect 0.5 0.5 0.125 at 0 0 pattern grid 2 x 2 spacing 1.0 1.0 starting at 4.0 1.0

@@ -72,6 +72,9 @@ pub enum Operation {
     PocketV2(PocketV2Op),
     FaceV2(FaceV2Op),
     StockDef(StockDef),
+    // Pattern operations
+    DrillPattern(DrillPatternOp),
+    PocketPattern(PocketPatternOp),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -362,4 +365,59 @@ pub struct FaceV2Op {
 pub enum FacePosition {
     Stock,        // Face entire stock area
     At(f64, f64), // Face centered at X, Y
+}
+
+// ============================================
+// Pattern Operations
+// ============================================
+
+/// Pattern definition for repeating operations
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    /// Grid pattern (rows x cols)
+    Grid {
+        rows: u32,
+        cols: u32,
+        spacing_x: f64,
+        spacing_y: f64,
+        start_position: Position,
+    },
+    /// Bolt circle pattern
+    BoltCircle {
+        count: u32,
+        diameter: f64,
+        center: Position,
+        start_angle: f64, // degrees, 0 = right (positive X)
+    },
+    /// Linear pattern along a direction
+    Line {
+        count: u32,
+        spacing: f64,
+        direction: Direction,
+        start_position: Position,
+    },
+    /// Arc pattern
+    Arc {
+        count: u32,
+        radius: f64,
+        center: Position,
+        start_angle: f64,
+        end_angle: f64,
+    },
+}
+
+/// Drill operation with pattern support
+#[derive(Debug, Clone, PartialEq)]
+pub struct DrillPatternOp {
+    pub diameter: f64,
+    pub depth: DrillDepth,
+    pub pattern: Pattern,
+}
+
+/// Pocket operation with pattern support  
+#[derive(Debug, Clone, PartialEq)]
+pub struct PocketPatternOp {
+    pub shape: PocketShape,
+    pub depth: f64,
+    pub pattern: Pattern,
 }

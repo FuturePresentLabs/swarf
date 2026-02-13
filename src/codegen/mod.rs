@@ -222,6 +222,8 @@ impl CodeGenerator {
             Operation::Clear(clear) => self.emit_clear(clear),
             Operation::DrillV2(drill) => self.emit_drill_v2(drill),
             Operation::PocketV2(pocket) => self.emit_pocket_v2(pocket),
+            Operation::DrillPattern(drill) => self.emit_drill_pattern(drill),
+            Operation::PocketPattern(pocket) => self.emit_pocket_pattern(pocket),
         }
     }
 
@@ -521,6 +523,138 @@ impl CodeGenerator {
 
         // Retract
         self.output.emit("G00 Z0.1");
+    }
+
+    fn emit_drill_pattern(&mut self, drill: &DrillPatternOp) {
+        self.output
+            .emit_comment(&format!("DRILL PATTERN - DIA={:.3}", drill.diameter));
+
+        // Calculate positions from pattern
+        let positions = self.calculate_pattern_positions(&drill.pattern);
+
+        // Generate drill operations for each position
+        for (i, pos) in positions.iter().enumerate() {
+            self.output.emit_comment(&format!("Hole {} at X{:.3} Y{:.3}", i + 1, pos.x, pos.y));
+
+            let drill_op = DrillV2Op {
+                diameter: drill.diameter,
+                position: *pos,
+                depth: drill.depth.clone(),
+            };
+            self.emit_drill_v2(&drill_op);
+        }
+    }
+
+    fn emit_pocket_pattern(&mut self, pocket: &PocketPatternOp) {
+        self.output.emit_comment("POCKET PATTERN");
+
+        // Calculate positions from pattern
+        let positions = self.calculate_pattern_positions(&pocket.pattern);
+
+        // Generate pocket operations for each position
+        for (i, pos) in positions.iter().enumerate() {
+            self.output
+                .emit_comment(&format!("Pocket {} at X{:.3} Y{:.3}", i + 1, pos.x, pos.y));
+
+            let pocket_op = PocketV2Op {
+                shape: pocket.shape.clone(),
+                position: *pos,
+                depth: pocket.depth,
+            };
+            self.emit_pocket_v2(&pocket_op);
+        }
+    }
+
+    fn calculate_pattern_positions(&self, pattern: &Pattern) -> Vec<Position> {
+        match pattern {
+            Pattern::Grid {
+                rows,
+                cols,
+                spacing_x,
+                spacing_y,
+                start_position,
+            } => {
+                let mut positions = Vec::new();
+                for row in 0..*rows {
+                    for col in 0..*cols {
+                        positions.push(Position::new(
+                            start_position.x + col as f64 * spacing_x,
+                            start_position.y + row as f64 * spacing_y,
+                        ));
+                    }
+                }
+                positions
+            }
+            Pattern::BoltCircle {
+                count,
+                diameter,
+                center,
+                start_angle,
+            } => {
+                let mut positions = Vec::new();
+                let radius = diameter / 2.0;
+                let start_rad = start_angle.to_radians();
+                let angle_step = 2.0 * std::f64::consts::PI / *count as f64;
+
+                for i in 0..*count {
+                    let angle = start_rad + i as f64 * angle_step;
+                    positions.push(Position::new(
+                        center.x + radius * angle.cos(),
+                        center.y + radius * angle.sin(),
+                    ));
+                }
+                positions
+            }
+            Pattern::Line {
+                count,
+                spacing,
+                direction,
+                start_position,
+            } => {
+                let mut positions = Vec::new();
+                let (dx, dy) = match direction {
+                    Direction::XPositive => (1.0, 0.0),
+                    Direction::XNegative => (-1.0, 0.0),
+                    Direction::YPositive => (0.0, 1.0),
+                    Direction::YNegative => (0.0, -1.0),
+                    _ => (1.0, 0.0),
+                };
+
+                for i in 0..*count {
+                    positions.push(Position::new(
+                        start_position.x + i as f64 * spacing * dx,
+                        start_position.y + i as f64 * spacing * dy,
+                    ));
+                }
+                positions
+            }
+            Pattern::Arc {
+                count,
+                radius,
+                center,
+                start_angle,
+                end_angle,
+            } => {
+                let mut positions = Vec::new();
+                let start_rad = start_angle.to_radians();
+                let end_rad = end_angle.to_radians();
+                let angle_range = end_rad - start_rad;
+                let angle_step = if *count > 1 {
+                    angle_range / (*count - 1) as f64
+                } else {
+                    0.0
+                };
+
+                for i in 0..*count {
+                    let angle = start_rad + i as f64 * angle_step;
+                    positions.push(Position::new(
+                        center.x + radius * angle.cos(),
+                        center.y + radius * angle.sin(),
+                    ));
+                }
+                positions
+            }
+        }
     }
 
     /// Generate zigzag raster pocket for rectangular pockets
