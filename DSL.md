@@ -288,6 +288,71 @@ face at stock depth 0.05        ; Face 0.05" off top
 
 ---
 
+## Tool Library
+
+Define tools in a separate JSON file and reference them by ID or name.
+
+### JSON Schema
+
+```json
+{
+  "1": {
+    "id": 1,
+    "name": "1/4 EM",
+    "dia": 0.25,
+    "flutes": 4,
+    "material": "carbide",
+    "length": 2.0,
+    "stickout": 1.5,
+    "max_rpm": 10000
+  }
+}
+```
+
+**Required fields:**
+- `id`: Tool number
+- `name`: Human-readable name
+- `dia`: Tool diameter (inches or mm based on units)
+- `flutes`: Number of flutes/cutting edges
+- `material`: `hss`, `carbide`, `cobalt`, or `ceramic`
+
+**Optional fields:**
+- `max_rpm`: Maximum spindle speed for this tool
+- `stickout`: Tool stickout from holder (for deflection calculations)
+- `length`: Overall tool length
+
+### CLI Usage
+
+```bash
+swarf --tools tools.json part.swarf -o output.nc
+```
+
+### Source Syntax
+
+Reference tools from the library:
+
+```swarf
+; By ID - tool data looked up from library
+tool 1
+
+; With inline override (uses library as base)
+tool 1 dia 0.5  ; Override diameter but keep other params
+```
+
+When using `tool <id>` without inline data, swarf looks up the tool in the library and auto-generates:
+- **RPM** from Black Book SFM data
+- **Feed rate** from chip load calculations
+- **Stepdown/stepover** for pocketing operations
+
+### Benefits
+
+- **No repetition**: Define tool once, use in many programs
+- **Consistency**: Same feeds/speeds across all jobs with that tool
+- **Validation**: Warns if tool not found in library
+- **Flexibility**: Override specific parameters when needed
+
+---
+
 ## Design Decisions
 
 1. **Why `at`?** Explicit marker prevents position/dimension confusion. `at zero` is elegant shorthand.
@@ -304,11 +369,10 @@ face at stock depth 0.05        ; Face 0.05" off top
 
 ## Future Extensions
 
-- **Patterns**: `drill 0.25 grid 3x2 spacing 1.0 0.75 at 0 0`
 - **Transform**: `rotate 45`, `mirror X`
-- **Tool**: Explicit tool selection `tool 1` or `tool 0.25 carbide 4flute`
-- **Stock**: `stock 3x2x0.5 6061-T6` for from-stock parts
 - **Finish**: `finish 0.005` for final pass stock
+- **Adaptive**: Adaptive clearing paths for pockets
+- **Probing**: Touch probe cycles for work offset setting
 
 ---
 

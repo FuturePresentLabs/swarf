@@ -9,7 +9,7 @@ build = "build.rs"
 
 [features]
 default = []
-viz = ["dep:warp", "dep:tokio", "dep:notify", "dep:serde_json", "dep:futures", "dep:image"]
+viz = ["dep:warp", "dep:tokio", "dep:notify", "dep:futures", "dep:image"]
 viz-3d = ["viz"]
 
 [dependencies]
@@ -17,12 +17,12 @@ logos = "0.14"          # Lexer generation
 ariadne = "0.4"         # Error reporting
 thiserror = "1.0"       # Error handling
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"      # JSON parsing for tool library
 
 # Viz dependencies (optional)
 warp = { version = "0.3", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"], optional = true }
 notify = { version = "6", optional = true }
-serde_json = { version = "1.0", optional = true }
 futures = { version = "0.3", optional = true }
 image = { version = "0.25", optional = true }
 wgpu = "28.0.0"

@@ -1,0 +1,21 @@
+; Tool library example - uses tools.json
+units imperial
+
+setup {
+    zero left front top
+    material "Aluminum 6061-T6"
+}
+
+; Use tool from library - just reference by ID
+tool 1
+
+; Face the top
+face at stock depth 0.05
+
+; Grid of holes using tool 4 (1/4 drill)
+tool 4
+drill 0.25 at 1.0 1.0 depth 0.25 pattern grid 2 x 2 spacing 1.0 1.0 starting at 1.0 1.0
+
+; Pocket with tool 2 (3/8 EM)
+tool 2
+pocket rect 1.0 0.75 0.125 at 2.0 1.0

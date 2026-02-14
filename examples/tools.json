@@ -1,0 +1,41 @@
+{
+  "1": {
+    "id": 1,
+    "name": "1/4 EM",
+    "dia": 0.25,
+    "flutes": 4,
+    "material": "carbide",
+    "length": 2.0,
+    "stickout": 1.5
+  },
+  "2": {
+    "id": 2,
+    "name": "3/8 EM",
+    "dia": 0.375,
+    "flutes": 4,
+    "material": "carbide",
+    "max_rpm": 10000
+  },
+  "3": {
+    "id": 3,
+    "name": "1/2 Face Mill",
+    "dia": 0.5,
+    "flutes": 4,
+    "material": "carbide",
+    "length": 3.0
+  },
+  "4": {
+    "id": 4,
+    "name": "1/4 Drill",
+    "dia": 0.25,
+    "flutes": 2,
+    "material": "hss"
+  },
+  "5": {
+    "id": 5,
+    "name": "3/16 Drill",
+    "dia": 0.1875,
+    "flutes": 2,
+    "material": "hss"
+  }
+}

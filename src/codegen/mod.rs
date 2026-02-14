@@ -46,6 +46,7 @@ pub struct CodeGenerator {
     setup: Option<SetupBlock>,
     stock: Option<StockDef>,
     max_rpm: Option<f64>,
+    tool_library: Option<crate::tool_library::ToolLibrary>,
 }
 
 impl CodeGenerator {
@@ -59,11 +60,17 @@ impl CodeGenerator {
             setup: None,
             stock: None,
             max_rpm: None,
+            tool_library: None,
         }
     }
 
     pub fn with_max_rpm(mut self, max_rpm: f64) -> Self {
         self.max_rpm = Some(max_rpm);
+        self
+    }
+
+    pub fn with_tool_library(mut self, library: crate::tool_library::ToolLibrary) -> Self {
+        self.tool_library = Some(library);
         self
     }
 

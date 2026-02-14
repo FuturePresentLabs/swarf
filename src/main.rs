@@ -7,6 +7,7 @@ mod codegen;
 mod lexer;
 mod parser;
 pub mod post;
+mod tool_library;
 mod validator;
 
 #[cfg(feature = "viz")]
@@ -129,6 +130,7 @@ fn main() {
             let mut input_path = None;
             let mut output_path = "output.nc";
             let mut max_rpm: Option<f64> = None;
+            let mut tools_path: Option<String> = None;
 
             let mut i = 1;
             while i < args.len() {
@@ -144,6 +146,15 @@ fn main() {
                             i += 2;
                         } else {
                             eprintln!("Error: --post requires an argument (mach3, linuxcnc, haas)");
+                            std::process::exit(1);
+                        }
+                    }
+                    "--tools" => {
+                        if i + 1 < args.len() {
+                            tools_path = Some(args[i + 1].clone());
+                            i += 2;
+                        } else {
+                            eprintln!("Error: --tools requires a path to tools.json");
                             std::process::exit(1);
                         }
                     }
@@ -189,7 +200,23 @@ fn main() {
                 std::process::exit(1);
             });
 
-            if let Err(e) = compile_with_post(input_path, output_path, post_type, max_rpm) {
+            // Load tool library if specified
+            let tool_library = if let Some(path) = tools_path {
+                match tool_library::ToolLibrary::from_file(&path) {
+                    Ok(lib) => {
+                        println!("Loaded {} tools from {}", lib.tools.len(), path);
+                        Some(lib)
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to load tool library: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            if let Err(e) = compile_with_post_and_tools(input_path, output_path, post_type, max_rpm, tool_library) {
                 eprintln!("Error: {:?}", e);
                 std::process::exit(1);
             }
@@ -204,6 +231,7 @@ fn print_usage() {
     println!("  swarf <input.swarf> [output.nc]        Compile swarf to G-code");
     println!("  swarf <input.swarf> --post <type>      Use post-processor");
     println!("  swarf <input.swarf> --max-rpm <rpm>    Limit spindle RPM (scales feed)");
+    println!("  swarf --tools <file> <input.swarf>     Use tool library JSON");
     println!("  swarf --viz <path>                     Start visualizer on http://localhost:3030");
     println!("  swarf --list-posts                     List available post-processors");
     println!("  swarf --help                           Show this help");
@@ -214,6 +242,10 @@ fn print_usage() {
     println!("  linuxcnc  - LinuxCNC");
     println!("  haas      - Haas");
     println!();
+    println!("Tool Library:");
+    println!("  swarf --tools tools.json part.swarf    Reference tools by ID or name");
+    println!("  In swarf: tool 1  or  tool \"3/8 EM\"");
+    println!();
     println!("Visualizer:");
     println!("  swarf --viz output.nc                  View G-code file");
     println!("  swarf --viz part.swarf                 View swarf file (live reload)");
@@ -222,16 +254,18 @@ fn print_usage() {
     println!("Examples:");
     println!("  swarf program.swarf output.nc");
     println!("  swarf program.swarf --post mach3 -o output.nc");
+    println!("  swarf program.swarf --tools tools.json -o output.nc");
     println!("  swarf program.swarf --max-rpm 10000 -o output.nc");
     println!("  swarf examples/bracket.swarf");
     println!("  swarf --viz examples/");
 }
 
 fn compile(input_path: &str, output_path: &str) -> Result<(), Error> {
-    compile_with_post(
+    compile_with_post_and_tools(
         input_path,
         output_path,
         post::PostProcessorType::Generic,
+        None,
         None,
     )
 }
@@ -242,6 +276,16 @@ fn compile_with_post(
     post_type: post::PostProcessorType,
     max_rpm: Option<f64>,
 ) -> Result<(), Error> {
+    compile_with_post_and_tools(input_path, output_path, post_type, max_rpm, None)
+}
+
+fn compile_with_post_and_tools(
+    input_path: &str,
+    output_path: &str,
+    post_type: post::PostProcessorType,
+    max_rpm: Option<f64>,
+    tool_library: Option<tool_library::ToolLibrary>,
+) -> Result<(), Error> {
     // Read input
     let source = fs::read_to_string(input_path)?;
 
@@ -251,6 +295,13 @@ fn compile_with_post(
     // Parse
     let mut parser = parser::Parser::new(tokens);
     let program = parser.parse()?;
+
+    // Resolve tool references from library
+    let program = if let Some(ref lib) = tool_library {
+        resolve_tools(program, lib)
+    } else {
+        program
+    };
 
     // Validate
     let validator = validator::Validator::new();
@@ -268,6 +319,12 @@ fn compile_with_post(
     } else {
         codegen::CodeGenerator::new()
     };
+    
+    // Pass tool library to codegen for auto-feeds/speeds
+    if let Some(lib) = tool_library {
+        codegen = codegen.with_tool_library(lib);
+    }
+    
     let gcode_output = codegen.generate_output(&program);
 
     // Apply post-processor
@@ -285,6 +342,40 @@ fn compile_with_post(
     );
 
     Ok(())
+}
+
+/// Resolve tool references by looking up in tool library
+fn resolve_tools(
+    mut program: ast::Program,
+    library: &tool_library::ToolLibrary,
+) -> ast::Program {
+    for op in &mut program.operations {
+        if let ast::Operation::ToolChange(ref mut tc) = op {
+            // Check if this is just a reference (no tool data) or has minimal data
+            let needs_lookup = tc.tool_data.is_none() || {
+                // If tool has no diameter, it needs lookup
+                tc.tool_data.as_ref().map(|d| d.diameter == 0.0).unwrap_or(true)
+            };
+
+            if needs_lookup {
+                // Try to find tool by ID
+                if let Some(tool_def) = library.get_by_id(tc.tool_number) {
+                    tc.tool_data = Some(ast::ToolData {
+                        diameter: tool_def.dia,
+                        length: tool_def.length.unwrap_or(0.0),
+                        flutes: tool_def.flutes,
+                        material: tool_def.material.to_ast_material(),
+                    });
+                } else {
+                    eprintln!(
+                        "Warning: Tool {} not found in tool library",
+                        tc.tool_number
+                    );
+                }
+            }
+        }
+    }
+    program
 }
 
 #[cfg(test)]
