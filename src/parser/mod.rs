@@ -384,7 +384,22 @@ impl Parser {
 
     fn parse_tool_change(&mut self) -> Result<Operation> {
         self.consume(Token::Tool)?;
-        let tool_num = self.expect_number()? as u8;
+        
+        // Accept either a number (traditional) or identifier (tool library ID)
+        let (tool_num, tool_id) = match self.peek() {
+            Some(Token::Number(n)) => {
+                let num = n.unwrap_or(0.0) as u8;
+                self.advance();
+                (num, None)
+            }
+            Some(Token::Identifier(id)) => {
+                let id_str = id.clone();
+                self.advance();
+                // For string IDs, we'll use 0 as placeholder - codegen will resolve
+                (0, Some(id_str))
+            }
+            _ => return Err(self.error("expected tool number or tool ID (e.g., 'tool 1' or 'tool EM_250_4FL')")),
+        };
 
         let tool_data = if self.peek() == Some(&Token::Diameter) {
             Some(self.parse_tool_data()?)
@@ -394,6 +409,7 @@ impl Parser {
 
         Ok(Operation::ToolChange(ToolChange {
             tool_number: tool_num,
+            tool_id,
             tool_data,
         }))
     }

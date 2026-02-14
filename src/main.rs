@@ -358,18 +358,30 @@ fn resolve_tools(
             };
 
             if needs_lookup {
-                // Try to find tool by ID
-                if let Some(tool_def) = library.get_by_id(tc.tool_number) {
+                // First try to find by string ID if present
+                let tool_def = tc.tool_id.as_ref()
+                    .and_then(|id| library.get_by_id(id))
+                    .or_else(|| {
+                        // Fall back to numeric ID lookup
+                        library.get_by_id(&tc.tool_number.to_string())
+                    });
+
+                if let Some(tool_def) = tool_def {
+                    // Update the tool number from the library tool's numeric ID
+                    tc.tool_number = tool_def.numeric_id();
                     tc.tool_data = Some(ast::ToolData {
-                        diameter: tool_def.dia,
+                        diameter: tool_def.diameter,
                         length: tool_def.length.unwrap_or(0.0),
                         flutes: tool_def.flutes,
                         material: tool_def.material.to_ast_material(),
                     });
                 } else {
+                    let tool_ref_num = tc.tool_number.to_string();
+                    let tool_ref = tc.tool_id.as_deref()
+                        .unwrap_or(&tool_ref_num);
                     eprintln!(
-                        "Warning: Tool {} not found in tool library",
-                        tc.tool_number
+                        "Warning: Tool '{}' not found in tool library",
+                        tool_ref
                     );
                 }
             }

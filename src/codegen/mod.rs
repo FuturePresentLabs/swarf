@@ -1242,7 +1242,7 @@ mod tests {
         gen.emit_setup(&setup);
 
         // Tool change with carbide end mill
-        let tool_change = ToolChange {
+        let tool_change = ToolChange { tool_id: None,
             tool_number: 1,
             tool_data: Some(ToolData {
                 diameter: 0.25,
@@ -1287,7 +1287,7 @@ mod tests {
         gen.emit_setup(&setup);
 
         // Tool change with face mill
-        let tool_change = ToolChange {
+        let tool_change = ToolChange { tool_id: None,
             tool_number: 1,
             tool_data: Some(ToolData {
                 diameter: 1.0,
@@ -1331,7 +1331,7 @@ mod tests {
         gen.current_material = setup.material;
 
         // Tool change
-        let tool_change = ToolChange {
+        let tool_change = ToolChange { tool_id: None,
             tool_number: 1,
             tool_data: Some(ToolData {
                 diameter: 0.25,
@@ -1373,7 +1373,7 @@ mod tests {
         gen.current_material = setup.material;
 
         // Tool change with end mill
-        let tool_change = ToolChange {
+        let tool_change = ToolChange { tool_id: None,
             tool_number: 1,
             tool_data: Some(ToolData {
                 diameter: 0.5,
@@ -1435,7 +1435,7 @@ mod tests {
         gen.current_material = setup.material;
 
         // Tool change with end mill
-        let tool_change = ToolChange {
+        let tool_change = ToolChange { tool_id: None,
             tool_number: 1,
             tool_data: Some(ToolData {
                 diameter: 0.25,
@@ -1490,7 +1490,7 @@ mod tests {
         gen.current_material = setup.material;
 
         // Tool change with smaller end mill (deeper cuts)
-        let tool_change = ToolChange {
+        let tool_change = ToolChange { tool_id: None,
             tool_number: 1,
             tool_data: Some(ToolData {
                 diameter: 0.25,
@@ -1544,7 +1544,7 @@ mod tests {
         gen.current_material = setup.material;
 
         // Tool change with large end mill
-        let tool_change = ToolChange {
+        let tool_change = ToolChange { tool_id: None,
             tool_number: 1,
             tool_data: Some(ToolData {
                 diameter: 1.0, // Large tool

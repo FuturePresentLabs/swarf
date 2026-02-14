@@ -290,36 +290,46 @@ face at stock depth 0.05        ; Face 0.05" off top
 
 ## Tool Library
 
-Define tools in a separate JSON file and reference them by ID or name.
+Define tools in a separate JSON file and reference them by ID or name. This eliminates repetitive tool specifications in every program.
 
 ### JSON Schema
 
 ```json
 {
-  "1": {
-    "id": 1,
-    "name": "1/4 EM",
-    "dia": 0.25,
-    "flutes": 4,
+  "EM_250_4FL": {
+    "tool_id": "EM_250_4FL",
+    "name": "1/4\" 4-Flute End Mill",
+    "type": "end_mill",
+    "diameter": 0.25,
+    "flute_count": 4,
     "material": "carbide",
-    "length": 2.0,
-    "stickout": 1.5,
-    "max_rpm": 10000
+    "coating": "TiAlN",
+    "max_rpm": 18000,
+    "default_feed_per_tooth": 0.0015,
+    "default_plunge_feed": 15.0,
+    "coolant_type": "flood",
+    "recommended_materials": ["aluminum", "steel", "stainless"]
   }
 }
 ```
 
 **Required fields:**
-- `id`: Tool number
+- `tool_id`: Unique string identifier (e.g., "EM_250_4FL", "DR_375_2FL")
 - `name`: Human-readable name
-- `dia`: Tool diameter (inches or mm based on units)
-- `flutes`: Number of flutes/cutting edges
-- `material`: `hss`, `carbide`, `cobalt`, or `ceramic`
+- `type`: Tool type - `end_mill`, `drill`, `ball_mill`, `chamfer_mill`, `face_mill`, `reamer`, `tap`, `countersink`
+- `diameter`: Tool diameter (inches or mm based on units)
+- `flute_count`: Number of flutes/cutting edges
+- `material`: Tool material - `hss`, `carbide`, `cobalt`, or `ceramic`
 
 **Optional fields:**
 - `max_rpm`: Maximum spindle speed for this tool
 - `stickout`: Tool stickout from holder (for deflection calculations)
 - `length`: Overall tool length
+- `default_feed_per_tooth`: Default chip load (IPT or mm/tooth)
+- `default_plunge_feed`: Default plunge feed rate
+- `coolant_type`: Recommended coolant - `none`, `flood`, `mist`, `through`, `air`
+- `coating`: Tool coating - `none`, `TiN`, `TiAlN`, `TiCN`, `AlTiN`, `diamond`
+- `recommended_materials`: Array of materials this tool works well with
 
 ### CLI Usage
 
@@ -329,20 +339,21 @@ swarf --tools tools.json part.swarf -o output.nc
 
 ### Source Syntax
 
-Reference tools from the library:
+Reference tools from the library by their string ID:
 
 ```swarf
-; By ID - tool data looked up from library
-tool 1
+; By string tool ID from library
+tool EM_250_4FL
 
-; With inline override (uses library as base)
-tool 1 dia 0.5  ; Override diameter but keep other params
+; Library tool with inline override
+tool EM_250_4FL dia 0.5  ; Override diameter, keep other params
 ```
 
-When using `tool <id>` without inline data, swarf looks up the tool in the library and auto-generates:
-- **RPM** from Black Book SFM data
-- **Feed rate** from chip load calculations
+When using `tool <tool_id>` without inline data, swarf looks up the tool and auto-generates:
+- **RPM** from Black Book SFM data (limited by tool's `max_rpm` if set)
+- **Feed rate** from chip load calculations (or uses `default_feed_per_tooth`)
 - **Stepdown/stepover** for pocketing operations
+- **Coolant** based on `coolant_type` setting
 
 ### Benefits
 

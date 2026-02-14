@@ -1,41 +1,87 @@
 {
-  "1": {
-    "id": 1,
-    "name": "1/4 EM",
-    "dia": 0.25,
-    "flutes": 4,
+  "EM_125_4FL": {
+    "tool_id": "EM_125_4FL",
+    "name": "1/8\" 4-Flute End Mill",
+    "type": "end_mill",
+    "diameter": 0.125,
+    "flute_count": 4,
     "material": "carbide",
-    "length": 2.0,
-    "stickout": 1.5
+    "coating": "TiAlN",
+    "max_rpm": 24000,
+    "default_feed_per_tooth": 0.001,
+    "coolant_type": "flood"
   },
-  "2": {
-    "id": 2,
-    "name": "3/8 EM",
-    "dia": 0.375,
-    "flutes": 4,
+  "EM_250_4FL": {
+    "tool_id": "EM_250_4FL",
+    "name": "1/4\" 4-Flute End Mill",
+    "type": "end_mill",
+    "diameter": 0.25,
+    "flute_count": 4,
     "material": "carbide",
-    "max_rpm": 10000
+    "coating": "TiAlN",
+    "max_rpm": 18000,
+    "default_feed_per_tooth": 0.0015,
+    "coolant_type": "flood",
+    "recommended_materials": ["aluminum", "steel", "stainless"]
   },
-  "3": {
-    "id": 3,
-    "name": "1/2 Face Mill",
-    "dia": 0.5,
-    "flutes": 4,
+  "EM_375_4FL": {
+    "tool_id": "EM_375_4FL",
+    "name": "3/8\" 4-Flute End Mill",
+    "type": "end_mill",
+    "diameter": 0.375,
+    "flute_count": 4,
     "material": "carbide",
-    "length": 3.0
+    "coating": "TiAlN",
+    "max_rpm": 12000,
+    "default_feed_per_tooth": 0.002,
+    "coolant_type": "flood"
   },
-  "4": {
-    "id": 4,
-    "name": "1/4 Drill",
-    "dia": 0.25,
-    "flutes": 2,
-    "material": "hss"
+  "EM_500_4FL": {
+    "tool_id": "EM_500_4FL",
+    "name": "1/2\" 4-Flute End Mill",
+    "type": "end_mill",
+    "diameter": 0.5,
+    "flute_count": 4,
+    "material": "carbide",
+    "coating": "TiAlN",
+    "max_rpm": 10000,
+    "default_feed_per_tooth": 0.0025,
+    "coolant_type": "flood"
   },
-  "5": {
-    "id": 5,
-    "name": "3/16 Drill",
-    "dia": 0.1875,
-    "flutes": 2,
-    "material": "hss"
+  "DR_250_2FL": {
+    "tool_id": "DR_250_2FL",
+    "name": "1/4\" Drill",
+    "type": "drill",
+    "diameter": 0.25,
+    "flute_count": 2,
+    "material": "hss",
+    "coating": "TiN",
+    "max_rpm": 8000,
+    "default_feed_per_tooth": 0.003,
+    "coolant_type": "flood"
+  },
+  "DR_375_2FL": {
+    "tool_id": "DR_375_2FL",
+    "name": "3/8\" Drill",
+    "type": "drill",
+    "diameter": 0.375,
+    "flute_count": 2,
+    "material": "hss",
+    "coating": "TiN",
+    "max_rpm": 6000,
+    "default_feed_per_tooth": 0.004,
+    "coolant_type": "flood"
+  },
+  "FM_100_4FL": {
+    "tool_id": "FM_100_4FL",
+    "name": "1\" Face Mill",
+    "type": "face_mill",
+    "diameter": 1.0,
+    "flute_count": 4,
+    "material": "carbide",
+    "coating": "AlTiN",
+    "max_rpm": 6000,
+    "default_feed_per_tooth": 0.003,
+    "coolant_type": "flood"
   }
 }

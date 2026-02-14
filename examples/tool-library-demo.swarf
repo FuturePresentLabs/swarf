@@ -1,4 +1,4 @@
-; Tool library example - uses tools.json
+; Tool library example - uses string tool IDs from tools.json
 units imperial
 
 setup {
@@ -6,16 +6,20 @@ setup {
     material "Aluminum 6061-T6"
 }
 
-; Use tool from library - just reference by ID
-tool 1
+; Use tool by string ID from library
+tool EM_250_4FL
 
 ; Face the top
 face at stock depth 0.05
 
-; Grid of holes using tool 4 (1/4 drill)
-tool 4
+; Grid of holes using drill from library
+tool DR_250_2FL
 drill 0.25 at 1.0 1.0 depth 0.25 pattern grid 2 x 2 spacing 1.0 1.0 starting at 1.0 1.0
 
-; Pocket with tool 2 (3/8 EM)
-tool 2
+; Pocket with 3/8 end mill
+tool EM_375_4FL
 pocket rect 1.0 0.75 0.125 at 2.0 1.0
+
+; Face mill operation
+tool FM_100_4FL
+face at stock depth 0.02

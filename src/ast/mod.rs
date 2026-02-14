@@ -80,6 +80,8 @@ pub enum Operation {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolChange {
     pub tool_number: u8,
+    /// Optional string identifier from tool library (e.g., "EM_250_4FL")
+    pub tool_id: Option<String>,
     pub tool_data: Option<ToolData>,
 }
 
