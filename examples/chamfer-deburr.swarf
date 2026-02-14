@@ -1,0 +1,33 @@
+; Chamfer and Deburr Example
+units imperial
+
+setup {
+    zero left front top
+    material "Aluminum 6061-T6"
+}
+
+; Use a chamfer mill or small end mill
+tool EM_125_4FL
+
+; Chamfer around rectangle perimeter
+; Syntax: chamfer <width> rect <w> <h> at <x> <y>
+chamfer 0.02 rect 2.0 1.5 at 1.0 0.75
+
+; Chamfer around circle
+chamfer 0.015 circle 1.0 at 3.0 0.75
+
+; Chamfer top of hole (countersink style)
+chamfer 0.02 hole 0.25 at 1.0 2.5
+
+; Deburr operations - light cleanup passes
+; Syntax: deburr <pass_depth> <geometry> at <x> <y>
+
+; Deburr rectangle edges
+tool EM_250_4FL
+deburr 0.005 rect 2.0 1.5 at 1.0 0.75
+
+; Deburr circle
+deburr 0.005 circle 1.0 at 3.0 0.75
+
+; Deburr part profile (uses stock bounds)
+deburr 0.005 profile at 0 0

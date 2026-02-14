@@ -75,6 +75,9 @@ pub enum Operation {
     // Pattern operations
     DrillPattern(DrillPatternOp),
     PocketPattern(PocketPatternOp),
+    // Chamfer and deburr operations
+    Chamfer(ChamferOp),
+    Deburr(DeburrOp),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -422,4 +425,38 @@ pub struct PocketPatternOp {
     pub shape: PocketShape,
     pub depth: f64,
     pub pattern: Pattern,
+}
+
+// ============================================
+// Chamfer and Deburr Operations
+// ============================================
+
+/// Chamfer operation - bevel edges
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChamferOp {
+    pub width: f64,           // Width of chamfer (leg of 45° triangle)
+    pub geometry: ChamferGeometry,
+    pub position: Position,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChamferGeometry {
+    Rect { width: f64, height: f64 },
+    Circle { diameter: f64 },
+    Hole { diameter: f64 },  // Chamfer inside a hole (top edge)
+}
+
+/// Deburr operation - clean up edges
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeburrOp {
+    pub pass_depth: f64,      // How deep to cut (typically 0.005-0.010")
+    pub geometry: DeburrGeometry,
+    pub position: Position,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeburrGeometry {
+    Rect { width: f64, height: f64 },
+    Circle { diameter: f64 },
+    Profile,                  // Deburr the part profile
 }

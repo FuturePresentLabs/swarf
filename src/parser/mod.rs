@@ -196,6 +196,8 @@ impl Parser {
                     height: c.height,
                     z_constraint: c.z_constraint,
                 })?),
+                Some(Token::Chamfer) => Operation::Chamfer(self.parse_chamfer()?),
+                Some(Token::Deburr) => Operation::Deburr(self.parse_deburr()?),
                 Some(_) => {
                     // Unknown token, skip for now
                     self.advance();
@@ -1091,6 +1093,73 @@ impl Parser {
             }
             _ => Ok(ZConstraint::Free),
         }
+    }
+
+    fn parse_chamfer(&mut self) -> Result<ChamferOp> {
+        self.consume(Token::Chamfer)?;
+
+        // Parse chamfer width (leg of 45° triangle)
+        let width = self.expect_number_or_fraction()?;
+
+        // Parse geometry type
+        let geometry = if self.peek() == Some(&Token::Rect) || self.peek() == Some(&Token::Rectangle) {
+            self.advance();
+            let w = self.expect_number_or_fraction()?;
+            let h = self.expect_number_or_fraction()?;
+            ChamferGeometry::Rect { width: w, height: h }
+        } else if self.peek() == Some(&Token::Circle) {
+            self.advance();
+            let dia = self.expect_number_or_fraction()?;
+            ChamferGeometry::Circle { diameter: dia }
+        } else if self.peek() == Some(&Token::Hole) {
+            self.advance();
+            let dia = self.expect_number_or_fraction()?;
+            ChamferGeometry::Hole { diameter: dia }
+        } else {
+            return Err(self.error("expected rect, circle, or hole for chamfer geometry"));
+        };
+
+        self.consume(Token::At)?;
+        let position = self.parse_at_position()?;
+
+        Ok(ChamferOp {
+            width,
+            geometry,
+            position,
+        })
+    }
+
+    fn parse_deburr(&mut self) -> Result<DeburrOp> {
+        self.consume(Token::Deburr)?;
+
+        // Parse pass depth (typically small, 0.005-0.010")
+        let pass_depth = self.expect_number_or_fraction()?;
+
+        // Parse geometry type
+        let geometry = if self.peek() == Some(&Token::Rect) || self.peek() == Some(&Token::Rectangle) {
+            self.advance();
+            let w = self.expect_number_or_fraction()?;
+            let h = self.expect_number_or_fraction()?;
+            DeburrGeometry::Rect { width: w, height: h }
+        } else if self.peek() == Some(&Token::Circle) {
+            self.advance();
+            let dia = self.expect_number_or_fraction()?;
+            DeburrGeometry::Circle { diameter: dia }
+        } else if self.peek() == Some(&Token::Profile) {
+            self.advance();
+            DeburrGeometry::Profile
+        } else {
+            return Err(self.error("expected rect, circle, or profile for deburr geometry"));
+        };
+
+        self.consume(Token::At)?;
+        let position = self.parse_at_position()?;
+
+        Ok(DeburrOp {
+            pass_depth,
+            geometry,
+            position,
+        })
     }
 
     fn parse_drill_v2(&mut self) -> Result<DrillV2Op> {

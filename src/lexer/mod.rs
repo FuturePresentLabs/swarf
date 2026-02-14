@@ -111,6 +111,16 @@ pub enum Token {
     #[token("tap")]
     Tap,
 
+    // Keywords - Edge operations
+    #[token("chamfer")]
+    Chamfer,
+
+    #[token("deburr")]
+    Deburr,
+
+    #[token("hole")]
+    Hole,
+
     // Keywords - Geometry
     #[token("at")]
     At,

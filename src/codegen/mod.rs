@@ -231,6 +231,8 @@ impl CodeGenerator {
             Operation::PocketV2(pocket) => self.emit_pocket_v2(pocket),
             Operation::DrillPattern(drill) => self.emit_drill_pattern(drill),
             Operation::PocketPattern(pocket) => self.emit_pocket_pattern(pocket),
+            Operation::Chamfer(chamfer) => self.emit_chamfer(chamfer),
+            Operation::Deburr(deburr) => self.emit_deburr(deburr),
         }
     }
 
@@ -786,6 +788,240 @@ impl CodeGenerator {
             let y = center_y + pocket_radius * angle.sin();
             self.output
                 .emit(&format!("G01 X{:.4} Y{:.4} F{:.1}", x, y, feed_rate));
+        }
+    }
+
+    fn calculate_chamfer_feed(&self) -> f64 {
+        if let Some(ref tool) = self.current_tool_data {
+            if let Some(ref material) = self.current_material {
+                let bb_tool = crate::black_book::ToolGeometry {
+                    diameter: tool.diameter,
+                    flute_count: tool.flutes,
+                    tool_material: match tool.material {
+                        crate::ast::ToolMaterial::HSS => crate::black_book::ToolMaterial::HSS,
+                        crate::ast::ToolMaterial::Carbide => crate::black_book::ToolMaterial::Carbide,
+                        crate::ast::ToolMaterial::Cobalt => crate::black_book::ToolMaterial::Cobalt,
+                        crate::ast::ToolMaterial::Ceramic => crate::black_book::ToolMaterial::Ceramic,
+                    },
+                    corner_radius: None,
+                    coating: None,
+                };
+                let engagement = crate::black_book::Engagement {
+                    axial_doc: tool.diameter * 0.1, // Light engagement for chamfering
+                    radial_woc: tool.diameter * 0.2,
+                    radial_engagement_pct: 20.0,
+                };
+                if let Ok(params) = self.black_book.calculate(material, &bb_tool, &engagement) {
+                    let (_, feed) = self.apply_rpm_limit(params.rpm as f64, params.feed_rate_ipm * 0.5);
+                    return feed;
+                }
+            }
+        }
+        20.0 // Default conservative feed
+    }
+
+    fn emit_chamfer(&mut self, chamfer: &ChamferOp) {
+        use crate::ast::ChamferGeometry;
+
+        self.output.emit_comment(&format!(
+            "CHAMFER - width: {:.3}",
+            chamfer.width
+        ));
+
+        // Get tool diameter for calculations
+        let tool_dia = self.current_tool_data.as_ref().map(|t| t.diameter).unwrap_or(0.25);
+        let feed_rate = self.calculate_chamfer_feed();
+
+        // Calculate chamfer depth (Z) based on width (45° chamfer)
+        let chamfer_depth = chamfer.width;
+
+        match &chamfer.geometry {
+            ChamferGeometry::Rect { width, height } => {
+                // Chamfer around rectangle perimeter
+                let half_width = width / 2.0;
+                let half_height = height / 2.0;
+                let center_x = chamfer.position.x;
+                let center_y = chamfer.position.y;
+
+                // Start at bottom-left corner (offset by tool radius)
+                let start_x = center_x - half_width + tool_dia/2.0;
+                let start_y = center_y - half_height + tool_dia/2.0;
+                let end_x = center_x + half_width - tool_dia/2.0;
+                let end_y = center_y + half_height - tool_dia/2.0;
+
+                // Rapid to start position at safe height
+                self.output.emit(&format!("G00 X{:.4} Y{:.4}", start_x, start_y));
+                self.output.emit("G00 Z0.1");
+
+                // Plunge to chamfer depth
+                self.output.emit(&format!("G01 Z-{:.4} F{:.1}", chamfer_depth, feed_rate * 0.3));
+
+                // Cut around rectangle
+                self.output.emit(&format!("G01 X{:.4} F{:.1}", end_x, feed_rate));
+                self.output.emit(&format!("G01 Y{:.4}", end_y));
+                self.output.emit(&format!("G01 X{:.4}", start_x));
+                self.output.emit(&format!("G01 Y{:.4}", start_y));
+
+                // Retract
+                self.output.emit("G00 Z0.1");
+            }
+            ChamferGeometry::Circle { diameter } => {
+                // Chamfer around circle perimeter
+                let radius = diameter / 2.0 - tool_dia/2.0;
+                let center_x = chamfer.position.x;
+                let center_y = chamfer.position.y;
+
+                // Rapid to start position
+                self.output.emit(&format!("G00 X{:.4} Y{:.4}", center_x + radius, center_y));
+                self.output.emit("G00 Z0.1");
+
+                // Plunge to chamfer depth
+                self.output.emit(&format!("G01 Z-{:.4} F{:.1}", chamfer_depth, feed_rate * 0.3));
+
+                // Cut circle
+                self.output.emit(&format!(
+                    "G03 X{:.4} Y{:.4} I{:.4} J{:.4} F{:.1}",
+                    center_x + radius,
+                    center_y,
+                    -radius,
+                    0.0,
+                    feed_rate
+                ));
+
+                // Retract
+                self.output.emit("G00 Z0.1");
+            }
+            ChamferGeometry::Hole { diameter } => {
+                // Chamfer top edge of hole (countersink style)
+                let radius = diameter / 2.0;
+                let center_x = chamfer.position.x;
+                let center_y = chamfer.position.y;
+
+                // Rapid to center
+                self.output.emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
+                self.output.emit("G00 Z0.1");
+
+                // Plunge to chamfer depth
+                self.output.emit(&format!("G01 Z-{:.4} F{:.1}", chamfer_depth, feed_rate * 0.3));
+
+                // Cut outward spiral for chamfer
+                let points_per_rev = 36;
+                let num_passes = (radius / (tool_dia * 0.3)).ceil() as i32;
+                for i in 0..=(num_passes * points_per_rev) {
+                    let angle = 2.0 * std::f64::consts::PI * (i as f64 / points_per_rev as f64);
+                    let r = (tool_dia * 0.3) * (i as f64 / points_per_rev as f64);
+                    let r = r.min(radius);
+                    let x = center_x + r * angle.cos();
+                    let y = center_y + r * angle.sin();
+                    self.output.emit(&format!("G01 X{:.4} Y{:.4} F{:.1}", x, y, feed_rate));
+                    if r >= radius {
+                        break;
+                    }
+                }
+
+                // Retract
+                self.output.emit("G00 Z0.1");
+            }
+        }
+    }
+
+    fn calculate_deburr_feed(&self) -> f64 {
+        // Even more conservative than chamfering
+        self.calculate_chamfer_feed() * 0.5
+    }
+
+    fn emit_deburr(&mut self, deburr: &DeburrOp) {
+        use crate::ast::DeburrGeometry;
+
+        self.output.emit_comment(&format!(
+            "DEBURR - pass depth: {:.3}",
+            deburr.pass_depth
+        ));
+
+        // Get tool diameter for calculations
+        let tool_dia = self.current_tool_data.as_ref().map(|t| t.diameter).unwrap_or(0.125);
+        let feed_rate = self.calculate_deburr_feed();
+
+        let pass_depth = deburr.pass_depth;
+
+        match &deburr.geometry {
+            DeburrGeometry::Rect { width, height } => {
+                // Deburr around rectangle perimeter
+                let half_width = width / 2.0 + tool_dia/2.0;
+                let half_height = height / 2.0 + tool_dia/2.0;
+                let center_x = deburr.position.x;
+                let center_y = deburr.position.y;
+
+                let start_x = center_x - half_width;
+                let start_y = center_y - half_height;
+                let end_x = center_x + half_width;
+                let end_y = center_y + half_height;
+
+                // Rapid to start
+                self.output.emit(&format!("G00 X{:.4} Y{:.4}", start_x, start_y));
+                self.output.emit("G00 Z0.05"); // Start just above surface
+
+                // Plunge to deburr depth
+                self.output.emit(&format!("G01 Z-{:.4} F{:.1}", pass_depth, feed_rate * 0.3));
+
+                // Light cut around perimeter
+                self.output.emit(&format!("G01 X{:.4} F{:.1}", end_x, feed_rate));
+                self.output.emit(&format!("G01 Y{:.4}", end_y));
+                self.output.emit(&format!("G01 X{:.4}", start_x));
+                self.output.emit(&format!("G01 Y{:.4}", start_y));
+
+                // Retract
+                self.output.emit("G00 Z0.1");
+            }
+            DeburrGeometry::Circle { diameter } => {
+                // Deburr around circle
+                let radius = diameter / 2.0 + tool_dia/2.0;
+                let center_x = deburr.position.x;
+                let center_y = deburr.position.y;
+
+                self.output.emit(&format!("G00 X{:.4} Y{:.4}", center_x + radius, center_y));
+                self.output.emit("G00 Z0.05");
+                self.output.emit(&format!("G01 Z-{:.4} F{:.1}", pass_depth, feed_rate * 0.3));
+
+                // Cut circle
+                self.output.emit(&format!(
+                    "G03 X{:.4} Y{:.4} I{:.4} J{:.4} F{:.1}",
+                    center_x + radius,
+                    center_y,
+                    -radius,
+                    0.0,
+                    feed_rate
+                ));
+
+                self.output.emit("G00 Z0.1");
+            }
+            DeburrGeometry::Profile => {
+                // Deburr the part profile - requires stock knowledge
+                // For now, just comment that this would use stock bounds
+                self.output.emit_comment("DEBURR PROFILE - requires stock definition");
+                
+                // If we have stock defined, use those bounds
+                if let Some(ref stock) = self.stock {
+                    let center_x = deburr.position.x;
+                    let center_y = deburr.position.y;
+                    let half_width = stock.size_x / 2.0 + tool_dia/2.0;
+                    let half_height = stock.size_y / 2.0 + tool_dia/2.0;
+
+                    let start_x = center_x - half_width;
+                    let start_y = center_y - half_height;
+                    let end_x = center_x + half_width;
+                    let end_y = center_y + half_height;
+
+                    self.output.emit(&format!("G00 X{:.4} Y{:.4}", start_x, start_y));
+                    self.output.emit("G00 Z0.05");
+                    self.output.emit(&format!("G01 Z-{:.4} F{:.1}", pass_depth, feed_rate * 0.3));
+                    self.output.emit(&format!("G01 X{:.4} F{:.1}", end_x, feed_rate));
+                    self.output.emit(&format!("G01 Y{:.4}", end_y));
+                    self.output.emit(&format!("G01 X{:.4}", start_x));
+                    self.output.emit(&format!("G01 Y{:.4}", start_y));
+                    self.output.emit("G00 Z0.1");
+                }
+            }
         }
     }
 

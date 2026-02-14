@@ -165,6 +165,56 @@ profile inside at 1.0 1.0 rect 2.0 1.5 ; Rectangular profile inside
 profile on at zero circle 1.0          ; On the line of 1" circle at zero
 ```
 
+### Chamfer
+
+Create beveled edges on holes or perimeters. Uses a chamfer mill or small end mill.
+
+```
+chamfer <width> rect <w> <h> at <position>
+chamfer <width> circle <dia> at <position>
+chamfer <width> hole <dia> at <position>
+```
+
+| Parameter | Meaning | Example |
+|-----------|---------|---------|
+| `width` | Chamfer width (leg of 45° triangle) | `0.02`, `1/32` |
+| `rect` | Rectangle geometry | `rect 2.0 1.5` |
+| `circle` | Circle perimeter | `circle 1.0` |
+| `hole` | Hole top edge (countersink) | `hole 0.25` |
+| `at` | Position | `at 1.0 0.5`, `at zero` |
+
+**Examples:**
+```
+chamfer 0.02 rect 2.0 1.5 at 1.0 0.75   ; Chamfer rectangle perimeter
+chamfer 1/32 circle 1.0 at 2.0 1.0      ; Chamfer around circle
+chamfer 0.02 hole 0.25 at 1.0 1.0       ; Countersink 1/4" hole
+```
+
+### Deburr
+
+Light cleanup pass to remove burrs from edges. Very conservative feeds/speeds.
+
+```
+deburr <pass_depth> rect <w> <h> at <position>
+deburr <pass_depth> circle <dia> at <position>
+deburr <pass_depth> profile at <position>
+```
+
+| Parameter | Meaning | Example |
+|-----------|---------|---------|
+| `pass_depth` | How deep to cut (typically 0.005-0.010") | `0.005` |
+| `rect` | Rectangle perimeter | `rect 2.0 1.5` |
+| `circle` | Circle perimeter | `circle 1.0` |
+| `profile` | Part profile (uses stock bounds) | `profile` |
+| `at` | Position | `at 1.0 0.5` |
+
+**Examples:**
+```
+deburr 0.005 rect 2.0 1.5 at 1.0 0.75   ; Deburr rectangle
+deburr 0.005 circle 1.0 at 2.0 1.0      ; Deburr circle
+deburr 0.005 profile at 0 0             ; Deburr part profile
+```
+
 ---
 
 ## Common Patterns
