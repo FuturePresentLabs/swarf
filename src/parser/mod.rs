@@ -185,7 +185,14 @@ impl Parser {
                     Operation::StockDef(self.parse_stock_def()?)
                 }
 
-                Some(Token::Tap) => self.parse_tap()?,
+                Some(Token::Tap) => {
+                    // Check if this is a tap pattern
+                    if self.is_tap_pattern() {
+                        Operation::TapPattern(self.parse_tap_pattern()?)
+                    } else {
+                        self.parse_tap()?
+                    }
+                }
                 Some(Token::Part) => Operation::PartDef(self.parse_part_def()?),
                 Some(Token::Setup) => Operation::Setup(self.parse_setup_block()?),
                 Some(Token::Cut) => Operation::Cut(self.parse_cut_op()?),
@@ -377,10 +384,17 @@ impl Parser {
 
         let pattern = self.parse_pattern()?;
 
+        // Parse optional islands
+        let mut islands = Vec::new();
+        while self.peek() == Some(&Token::Island) {
+            islands.push(self.parse_island()?);
+        }
+
         Ok(PocketPatternOp {
             shape,
             depth,
             pattern,
+            islands,
         })
     }
 
@@ -661,6 +675,133 @@ impl Parser {
             stepover,
             feed_rate,
         }))
+    }
+
+    fn is_tap_pattern(&self) -> bool {
+        // Look ahead to check if tap is followed by pattern
+        // tap <size> at pattern ...
+        if let Some((Token::Tap, _)) = self.tokens.get(self.position) {
+            // Check if there's a pattern keyword after the size and at
+            let mut pos = self.position + 1;
+            // Skip the tap size (could be number or identifier like "1/4-20")
+            if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Identifier(_), _))) {
+                pos += 1;
+            }
+            // Skip "at"
+            if matches!(self.tokens.get(pos), Some((Token::At, _))) {
+                pos += 1;
+            }
+            // Check for pattern
+            return matches!(self.tokens.get(pos), Some((Token::Pattern, _)));
+        }
+        false
+    }
+
+    fn parse_tap_pattern(&mut self) -> Result<TapPatternOp> {
+        self.consume(Token::Tap)?;
+
+        // Parse thread size (e.g., "1/4-20", "M6", "M8x1.25")
+        let size = match self.peek() {
+            Some(Token::Identifier(s)) => {
+                let size = s.clone();
+                self.advance();
+                size
+            }
+            Some(Token::String(s)) => {
+                let size = s.clone();
+                self.advance();
+                size
+            }
+            _ => return Err(self.error("expected thread size like '1/4-20' or 'M6'")),
+        };
+
+        // Convert size to diameter
+        let diameter = Self::size_to_diameter(&size);
+
+        // Parse pitch if specified, otherwise calculate from size
+        let pitch = if self.peek() == Some(&Token::Pitch) {
+            self.advance();
+            self.expect_number_or_fraction()?
+        } else {
+            // Default pitch calculation based on common sizes
+            Self::calculate_pitch_from_size(&size)
+        };
+
+        self.consume(Token::At)?;
+        self.consume(Token::Pattern)?;
+
+        let pattern = self.parse_pattern()?;
+
+        let depth = if self.peek() == Some(&Token::Depth) {
+            self.advance();
+            DrillDepth::Depth(self.expect_number_or_fraction()?)
+        } else {
+            // Default depth based on tap size
+            DrillDepth::Depth(Self::default_tap_depth(&size))
+        };
+
+        Ok(TapPatternOp {
+            diameter,
+            pitch,
+            pattern,
+            depth,
+        })
+    }
+
+    fn size_to_diameter(size: &str) -> f64 {
+        // Convert thread size to diameter
+        match size {
+            "1/4-20" | "1/4-28" => 0.25,
+            "5/16-18" | "5/16-24" => 0.3125,
+            "3/8-16" | "3/8-24" => 0.375,
+            "M4" => 4.0 / 25.4,
+            "M5" => 5.0 / 25.4,
+            "M6" => 6.0 / 25.4,
+            "M8" => 8.0 / 25.4,
+            "M10" => 10.0 / 25.4,
+            "M12" => 12.0 / 25.4,
+            _ => {
+                // Try to parse as a number
+                size.parse().unwrap_or(0.25)
+            }
+        }
+    }
+
+    fn calculate_pitch_from_size(size: &str) -> f64 {
+        // Common imperial and metric thread pitches
+        match size {
+            "1/4-20" => 0.05,      // 20 TPI = 0.05"
+            "1/4-28" => 0.0357,    // 28 TPI
+            "5/16-18" => 0.0556,   // 18 TPI
+            "5/16-24" => 0.0417,   // 24 TPI
+            "3/8-16" => 0.0625,    // 16 TPI
+            "3/8-24" => 0.0417,    // 24 TPI
+            "M4" => 0.7,           // mm
+            "M5" => 0.8,           // mm
+            "M6" => 1.0,           // mm
+            "M8" => 1.25,          // mm
+            "M10" => 1.5,          // mm
+            "M12" => 1.75,         // mm
+            _ => 0.05,              // Default
+        }
+    }
+
+    fn default_tap_depth(size: &str) -> f64 {
+        // Default tap depth is 2x diameter or 3x pitch, whichever is greater
+        let diameter = match size {
+            "1/4-20" | "1/4-28" => 0.25,
+            "5/16-18" | "5/16-24" => 0.3125,
+            "3/8-16" | "3/8-24" => 0.375,
+            "M4" => 4.0 / 25.4,    // Convert mm to inches
+            "M5" => 5.0 / 25.4,
+            "M6" => 6.0 / 25.4,
+            "M8" => 8.0 / 25.4,
+            "M10" => 10.0 / 25.4,
+            "M12" => 12.0 / 25.4,
+            _ => 0.25,
+        };
+        let depth: f64 = diameter * 2.0;
+        depth.max(0.5) // At least 0.5" deep
     }
 
     fn parse_tap(&mut self) -> Result<Operation> {
@@ -1214,11 +1355,41 @@ impl Parser {
         self.consume(Token::At)?;
         let position = self.parse_at_position()?;
 
+        // Parse optional islands
+        let mut islands = Vec::new();
+        while self.peek() == Some(&Token::Island) {
+            islands.push(self.parse_island()?);
+        }
+
         Ok(PocketV2Op {
             shape,
             position,
             depth,
+            islands,
         })
+    }
+
+    fn parse_island(&mut self) -> Result<Island> {
+        self.consume(Token::Island)?;
+
+        // Parse island shape: rect or circle
+        let shape = if self.peek() == Some(&Token::Rect) || self.peek() == Some(&Token::Rectangle) {
+            self.advance();
+            let width = self.expect_number_or_fraction()?;
+            let height = self.expect_number_or_fraction()?;
+            IslandShape::Rect { width, height }
+        } else if self.peek() == Some(&Token::Circle) {
+            self.advance();
+            let diameter = self.expect_number_or_fraction()?;
+            IslandShape::Circle { diameter }
+        } else {
+            return Err(self.error("expected rect or circle for island shape"));
+        };
+
+        self.consume(Token::At)?;
+        let position = self.parse_at_position()?;
+
+        Ok(Island { shape, position })
     }
 
     fn parse_face_v2(&mut self) -> Result<FaceV2Op> {

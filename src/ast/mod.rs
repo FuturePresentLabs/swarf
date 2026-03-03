@@ -75,6 +75,7 @@ pub enum Operation {
     // Pattern operations
     DrillPattern(DrillPatternOp),
     PocketPattern(PocketPatternOp),
+    TapPattern(TapPatternOp),
     // Chamfer and deburr operations
     Chamfer(ChamferOp),
     Deburr(DeburrOp),
@@ -351,10 +352,24 @@ pub struct PocketV2Op {
     pub shape: PocketShape,
     pub position: Position,
     pub depth: f64,
+    pub islands: Vec<Island>,  // Islands to avoid when pocketing
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PocketShape {
+    Rect { width: f64, height: f64 },
+    Circle { diameter: f64 },
+}
+
+/// Island to avoid when pocketing
+#[derive(Debug, Clone, PartialEq)]
+pub struct Island {
+    pub shape: IslandShape,
+    pub position: Position,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum IslandShape {
     Rect { width: f64, height: f64 },
     Circle { diameter: f64 },
 }
@@ -411,6 +426,73 @@ pub enum Pattern {
     },
 }
 
+impl Pattern {
+    /// Generate positions from pattern
+    pub fn generate_positions(&self) -> Vec<Position> {
+        match self {
+            Pattern::Grid { rows, cols, spacing_x, spacing_y, start_position } => {
+                let mut positions = Vec::new();
+                for row in 0..*rows {
+                    for col in 0..*cols {
+                        positions.push(Position {
+                            x: start_position.x + col as f64 * spacing_x,
+                            y: start_position.y + row as f64 * spacing_y,
+                        });
+                    }
+                }
+                positions
+            }
+            Pattern::BoltCircle { count, diameter, center, start_angle } => {
+                let mut positions = Vec::new();
+                let radius = diameter / 2.0;
+                let angle_step = 2.0 * std::f64::consts::PI / *count as f64;
+                let start_rad = start_angle.to_radians();
+                
+                for i in 0..*count {
+                    let angle = start_rad + i as f64 * angle_step;
+                    positions.push(Position {
+                        x: center.x + radius * angle.cos(),
+                        y: center.y + radius * angle.sin(),
+                    });
+                }
+                positions
+            }
+            Pattern::Line { count, spacing, direction, start_position } => {
+                let mut positions = Vec::new();
+                let (dx, dy) = match direction {
+                    Direction::XPositive => (1.0, 0.0),
+                    Direction::XNegative => (-1.0, 0.0),
+                    Direction::YPositive => (0.0, 1.0),
+                    Direction::YNegative => (0.0, -1.0),
+                    _ => (1.0, 0.0),
+                };
+                for i in 0..*count {
+                    positions.push(Position {
+                        x: start_position.x + dx * i as f64 * spacing,
+                        y: start_position.y + dy * i as f64 * spacing,
+                    });
+                }
+                positions
+            }
+            Pattern::Arc { count, radius, center, start_angle, end_angle } => {
+                let mut positions = Vec::new();
+                let start_rad = start_angle.to_radians();
+                let end_rad = end_angle.to_radians();
+                let angle_step = (end_rad - start_rad) / (*count as f64 - 1.0).max(1.0);
+                
+                for i in 0..*count {
+                    let angle = start_rad + i as f64 * angle_step;
+                    positions.push(Position {
+                        x: center.x + radius * angle.cos(),
+                        y: center.y + radius * angle.sin(),
+                    });
+                }
+                positions
+            }
+        }
+    }
+}
+
 /// Drill operation with pattern support
 #[derive(Debug, Clone, PartialEq)]
 pub struct DrillPatternOp {
@@ -424,6 +506,16 @@ pub struct DrillPatternOp {
 pub struct PocketPatternOp {
     pub shape: PocketShape,
     pub depth: f64,
+    pub pattern: Pattern,
+    pub islands: Vec<Island>,
+}
+
+/// Tap operation with pattern support
+#[derive(Debug, Clone, PartialEq)]
+pub struct TapPatternOp {
+    pub diameter: f64,
+    pub pitch: f64,       // Thread pitch (e.g., 0.05 for 1/4-20)
+    pub depth: DrillDepth,
     pub pattern: Pattern,
 }
 

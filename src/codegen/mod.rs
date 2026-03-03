@@ -233,6 +233,7 @@ impl CodeGenerator {
             Operation::PocketPattern(pocket) => self.emit_pocket_pattern(pocket),
             Operation::Chamfer(chamfer) => self.emit_chamfer(chamfer),
             Operation::Deburr(deburr) => self.emit_deburr(deburr),
+            Operation::TapPattern(tap) => self.emit_tap_pattern(tap),
         }
     }
 
@@ -569,6 +570,7 @@ impl CodeGenerator {
                 shape: pocket.shape.clone(),
                 position: *pos,
                 depth: pocket.depth,
+                islands: pocket.islands.clone(),
             };
             self.emit_pocket_v2(&pocket_op);
         }
@@ -1430,6 +1432,43 @@ impl CodeGenerator {
         self.output.emit(&format!("G00 Z{:.3}", t.retract_height));
     }
 
+    fn emit_tap_pattern(&mut self, t: &TapPatternOp) {
+        self.output.emit_comment("TAPPING PATTERN CYCLE");
+
+        // Generate positions from pattern
+        let positions = t.pattern.generate_positions();
+        
+        // Get depth value
+        let depth = match t.depth {
+            DrillDepth::Thru => 10.0, // Should get from stock
+            DrillDepth::Depth(d) => d,
+        };
+
+        // Rapid to retract height
+        let retract_height = 5.0;
+        self.output.emit(&format!("G00 Z{:.3}", retract_height));
+
+        for (i, pos) in positions.iter().enumerate() {
+            self.output
+                .emit(&format!("G00 X{:.3} Y{:.3}", pos.x, pos.y));
+
+            if i == 0 {
+                // G84 tapping cycle
+                // Calculate feed rate: RPM * pitch
+                let rpm = 500.0; // Default, should come from spindle command
+                let feed = rpm * t.pitch;
+
+                self.output.emit(&format!(
+                    "G84 Z{:.3} R{:.3} F{:.2}",
+                    -depth, retract_height, feed
+                ));
+            }
+        }
+
+        self.output.emit("G80");
+        self.output.emit(&format!("G00 Z{:.3}", retract_height));
+    }
+
     fn emit_footer(&mut self, footer: &Footer) {
         self.output.emit_comment("PROGRAM END");
 
@@ -1628,6 +1667,7 @@ mod tests {
             },
             position: Position::new(1.0, 0.75),
             depth: 0.25,
+            islands: Vec::new(),
         };
         gen.emit_pocket_v2(&pocket);
 
@@ -1687,6 +1727,7 @@ mod tests {
             shape: PocketShape::Circle { diameter: 1.0 },
             position: Position::new(2.0, 2.0),
             depth: 0.125,
+            islands: Vec::new(),
         };
         gen.emit_pocket_v2(&pocket);
 
@@ -1745,6 +1786,7 @@ mod tests {
             },
             position: Position::new(0.5, 0.375),
             depth: 0.5, // Deep pocket
+            islands: Vec::new(),
         };
         gen.emit_pocket_v2(&pocket);
 
@@ -1796,6 +1838,7 @@ mod tests {
             shape: PocketShape::Circle { diameter: 1.25 }, // Only 0.25" larger than tool
             position: Position::new(0.0, 0.0),
             depth: 0.1,
+            islands: Vec::new(),
         };
         gen.emit_pocket_v2(&pocket);
 

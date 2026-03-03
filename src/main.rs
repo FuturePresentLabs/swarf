@@ -5,6 +5,7 @@ mod ast;
 pub mod black_book;
 mod codegen;
 mod lexer;
+pub mod mesh;
 mod parser;
 pub mod post;
 mod tool_library;
@@ -131,6 +132,8 @@ fn main() {
             let mut output_path = "output.nc";
             let mut max_rpm: Option<f64> = None;
             let mut tools_path: Option<String> = None;
+            let mut stl_path: Option<String> = None;
+            let mut stl_voxel: f64 = 0.05;
 
             let mut i = 1;
             while i < args.len() {
@@ -168,6 +171,27 @@ fn main() {
                             i += 2;
                         } else {
                             eprintln!("Error: --max-rpm requires an argument (e.g., 10000)");
+                            std::process::exit(1);
+                        }
+                    }
+                    "--stl" => {
+                        if i + 1 < args.len() {
+                            stl_path = Some(args[i + 1].clone());
+                            i += 2;
+                        } else {
+                            eprintln!("Error: --stl requires an output path (e.g. part.stl)");
+                            std::process::exit(1);
+                        }
+                    }
+                    "--stl-voxel" => {
+                        if i + 1 < args.len() {
+                            stl_voxel = args[i + 1].parse().unwrap_or_else(|_| {
+                                eprintln!("Error: --stl-voxel requires a valid number");
+                                std::process::exit(1);
+                            });
+                            i += 2;
+                        } else {
+                            eprintln!("Error: --stl-voxel requires a size value");
                             std::process::exit(1);
                         }
                     }
@@ -220,6 +244,17 @@ fn main() {
                 eprintln!("Error: {:?}", e);
                 std::process::exit(1);
             }
+
+            // STL export (runs after successful G-code generation)
+            if let Some(stl_out) = stl_path {
+                match generate_stl(input_path, &stl_out, stl_voxel) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        eprintln!("STL error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
         }
     }
 }
@@ -258,6 +293,44 @@ fn print_usage() {
     println!("  swarf program.swarf --max-rpm 10000 -o output.nc");
     println!("  swarf examples/bracket.swarf");
     println!("  swarf --viz examples/");
+}
+
+fn generate_stl(input_path: &str, stl_path: &str, voxel_size: f64) -> Result<(), String> {
+    let source = fs::read_to_string(input_path).map_err(|e| e.to_string())?;
+    let tokens = lexer::lex(&source);
+    let mut parser = parser::Parser::new(tokens);
+    let program = parser.parse().map_err(|e| e.to_string())?;
+
+    let (final_mesh, snapshots) = mesh::generate_from_program(&program, voxel_size)?;
+
+    // Write per-op snapshots as <base>_op<N>.stl
+    let base = stl_path.trim_end_matches(".stl");
+    for (i, snap) in snapshots.iter().enumerate() {
+        let snap_path = format!("{}_op{}.stl", base, i);
+        snap.mesh
+            .write_stl(&snap_path)
+            .map_err(|e| e.to_string())?;
+        println!(
+            "  [op {}] {} → {} ({} triangles)",
+            i,
+            snap.label,
+            snap_path,
+            snap.mesh.triangle_count()
+        );
+    }
+
+    // Write final mesh
+    final_mesh
+        .write_stl(stl_path)
+        .map_err(|e| e.to_string())?;
+    println!(
+        "STL: {} ({} triangles, voxel {:.4})",
+        stl_path,
+        final_mesh.triangle_count(),
+        voxel_size
+    );
+
+    Ok(())
 }
 
 fn compile(input_path: &str, output_path: &str) -> Result<(), Error> {
@@ -319,12 +392,12 @@ fn compile_with_post_and_tools(
     } else {
         codegen::CodeGenerator::new()
     };
-    
+
     // Pass tool library to codegen for auto-feeds/speeds
     if let Some(lib) = tool_library {
         codegen = codegen.with_tool_library(lib);
     }
-    
+
     let gcode_output = codegen.generate_output(&program);
 
     // Apply post-processor
