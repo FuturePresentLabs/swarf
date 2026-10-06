@@ -4,6 +4,7 @@
 //! Milling tool/spindle assumptions do not apply.
 use serde::{Deserialize, Serialize};
 use transmog_core::ir::SketchSegment;
+pub mod cam;
 pub mod wam_pro;
 pub mod wazer;
 pub mod wazer_compare;
