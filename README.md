@@ -8,6 +8,10 @@
 
 Natural language → DSL → Validated G-code for CNC machining.
 
+The separate [waterjet library](crates/swarf-waterjet/README.md) accepts Transmog
+profiles and produces typed centreline operation drafts. It has no controller
+output and does not use milling feeds or spindle assumptions.
+
 ## Why?
 
 Writing G-code by hand is tedious and error-prone. CAM software is powerful but slow for simple operations. **swarf** hits the sweet spot: fast to write, easy to read, and generates verifiable output.
