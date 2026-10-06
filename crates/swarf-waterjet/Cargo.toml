@@ -3,9 +3,10 @@ name = "swarf-waterjet"
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0"
-description = "Typed, deterministic waterjet operation drafts; no controller output"
+description = "Typed waterjet drafts and observed WAZER research dialect; no machine qualification"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 transmog-core = { path = "../../../transmog/crates/transmog-core" }
+schemars = "1"

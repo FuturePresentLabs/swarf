@@ -1,8 +1,10 @@
 //! Waterjet operation ownership. Coordinates are XY millimetres, Y negative
 //! down from the stock's top left. This draft does not certify cut geometry or
-//! produce controller commands. Milling tool/spindle assumptions do not apply.
+//! certify controller commands. The `wazer` module emits research candidates.
+//! Milling tool/spindle assumptions do not apply.
 use serde::{Deserialize, Serialize};
 use transmog_core::ir::SketchSegment;
+pub mod wazer;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
