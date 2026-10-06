@@ -333,8 +333,29 @@ pub fn plan(request: &Request, intent: &Intent) -> Result<Plan, Error> {
             cut_spans_mm: spans,
         });
     }
-    let draft = compile(compiled).map_err(|e| Error(e.to_string()))?;
-    Ok(Plan{schema:"swarf.waterjet-cam.v1",kerf_mm:kerf,kerf_basis:if intent.kerf_override_mm.is_some(){"explicit_override"}else{"request_published_nominal"},paths,draft,machine_output_enabled:false,limitations:vec!["Simple closed polygon miter offsets; topology splitting/collapsed edges and sharp miters are refused.","Uncut tab widths are nominal centerline gaps, not measured holding strength; leads on every repierced cut span are checked geometrically.","Even-odd nested material boundaries are explicit cut policy; no artwork fill/stroke inference.","Planning operations only; cut quality, pressure/abrasive timing, mechanical stock and controller compatibility unqualified."]})
+    let limitations = vec![
+        "Simple closed polygon miter offsets; topology splitting/collapsed edges and sharp miters are refused.",
+        "Uncut tab widths are nominal centerline gaps, not measured holding strength; leads on every repierced cut span are checked geometrically.",
+        "Even-odd nested material boundaries are explicit cut policy; no artwork fill/stroke inference.",
+        "Planning operations only; cut quality, pressure/abrasive timing, mechanical stock and controller compatibility unqualified.",
+    ];
+    let mut draft = compile(compiled).map_err(|e| Error(e.to_string()))?;
+    // The source centerline compiler cannot describe which CAM policies have
+    // now been applied. Keep the plan's limitations as the single source of truth.
+    draft.blockers = limitations.iter().map(|s| (*s).to_owned()).collect();
+    Ok(Plan {
+        schema: "swarf.waterjet-cam.v1",
+        kerf_mm: kerf,
+        kerf_basis: if intent.kerf_override_mm.is_some() {
+            "explicit_override"
+        } else {
+            "request_published_nominal"
+        },
+        paths,
+        draft,
+        machine_output_enabled: false,
+        limitations,
+    })
 }
 
 #[cfg(test)]
