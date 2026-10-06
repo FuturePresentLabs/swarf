@@ -45,6 +45,7 @@ fn number(value: &str) -> Result<f64, Error> {
 #[serde(rename_all = "snake_case")]
 pub enum Profile {
     HistoricalWam16,
+    Wam24ProPresegmented,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -432,6 +433,32 @@ pub fn research_post(draft: &Draft, profile: Profile) -> Result<ResearchCode, Er
         draft.operations == rebuilt.operations,
         "draft operations differ from compilation",
     )?;
+    if profile == Profile::Wam24ProPresegmented {
+        require(
+            rebuilt.request.contours.len() == 1,
+            "service profile requires one contour",
+        )?;
+        let contour = &rebuilt.request.contours[0];
+        require(contour.closed, "service profile requires closed contour")?;
+        let mut vertices_mm = Vec::new();
+        for segment in &contour.profile {
+            let transmog_core::ir::SketchSegment::Line { start, end } = segment else {
+                return Err(Error("service requires lines".into()));
+            };
+            if vertices_mm.is_empty() {
+                vertices_mm.push([start.x, -start.y]);
+            }
+            vertices_mm.push([end.x, -end.y]);
+        }
+        return crate::wam_pro::research_service_post(&crate::wam_pro::ServiceRequest {
+            vertices_mm,
+            stock_width_depth_mm: rebuilt.request.cutting_area_width_depth_mm,
+            material_label: rebuilt.request.material.clone(),
+            thickness_mm: rebuilt.request.thickness_mm,
+            feed_mm_min: rebuilt.request.feed_mm_min,
+            pierce_seconds: rebuilt.request.pierce_seconds,
+        });
+    }
     label(&draft.request.material)?;
     let [w, h] = draft.request.cutting_area_width_depth_mm;
     let mut commands = vec![
