@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 pub const MAX_SOURCE: usize = 1024 * 1024;
 pub mod lathe;
+pub mod lathe_stock;
 pub mod physics;
 pub mod removal;
 pub const MAX_SEGMENTS: usize = 20_000;

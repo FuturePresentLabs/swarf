@@ -96,3 +96,44 @@ for the illustrative fixture.
 
 See the public [provider contract](../black-book-protocol/README.md). No
 GitHub release assets have been published yet; don't rely on invented URLs.
+
+## Turning removal and whole gang checks
+
+`lathe_stock::Simulation::new(&lathe_replay, &stock_settings)` models rotating
+stock as occupied radial/axial annular cells. `advance` sweeps the selected insert
+on spindle-on feed segments and removes each cell once; its exact annular weight
+is used for volume and interval MRR. `mesh()` revolves exposed cell faces about Z.
+API coordinates are physical [radial X, circumferential Y, axial Z] millimeters.
+
+Every mounted tool requires an explicit insert box and 1–8 holder boxes, plus
+1–8 named chuck/spindle/fixture cylinders and geometry provenance. Tool-relative
+boxes follow the owner's resolved carriage offsets. Rigid body overlap between
+different mounted tools rejects the configuration. Initially engaged stock or
+fixture contact stops at time zero. Every moving insert (including inactive
+ones) and holder is swept against fixtures and remaining stock. Only an active
+spindle-on feed insert may cut stock; rapid contact and holder/inactive contact
+latch an immediate geometric stop. Nothing moves or removes after that cursor.
+Cells removed earlier in a segment are considered before later body contacts.
+
+Checks are conservative **against the modeled cell stock**: a ring cell is
+bounded by a solid cylinder to its outer radius, so hollows and detailed holder
+shapes can produce false positives. The clearance margin includes arc chord
+tolerance. Removal uses cell centers, so boundary accuracy depends on resolution;
+the box insert is not a nose-radius/edge model. No spindle phase, acceleration,
+braking distance, backlash, deflection, forces or heat are predicted. Synthetic
+fixtures do not establish real-machine clearance. Reports always retain
+`collision_qualified:false` and `machine_output_enabled:false`.
+
+Stock dimensions must divide by cell size (.05–2 mm), with at most 50,000 cells,
+200 million bounded checks per simulation and 200,000 mesh triangles. Advances
+are monotone and transactional; invalid clocks, changed replay identity or an
+exhausted budget leave stock and cursor unchanged. Reset to seek backward.
+
+The JSON operation `lathe_stock` takes `source_text`, lathe `settings`,
+`stock_settings`, `at_ms` and `interval_ms`. Like milling removal, it reconstructs
+the earlier interval before reporting. See `fixtures/lathe-stock.synthetic.json`
+and `fixtures/lathe-gang-clear.request.json` for a synthetic clear transfer;
+the original `lathe-gang.request.json` is retained as an adverse geometry case.
+Analytical annulus/facing volume, split-clock invariance, thin swept obstacles,
+active holders, inactive inserts, initial interference and failure atomicity are
+verified by tests. Shop geometry and installed Mach3 behavior remain unqualified.

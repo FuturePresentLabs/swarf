@@ -6,6 +6,13 @@ use swarf_preview::{Settings, compile, path_stl, seek};
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 enum Operation {
+    LatheStock {
+        source_text: String,
+        settings: swarf_preview::lathe::Settings,
+        stock_settings: swarf_preview::lathe_stock::Settings,
+        at_ms: f64,
+        interval_ms: f64,
+    },
     LatheCompile {
         source_text: String,
         settings: swarf_preview::lathe::Settings,
@@ -63,6 +70,22 @@ fn run() -> Result<()> {
         "wrong request version"
     );
     let output = match request.request {
+        Operation::LatheStock {
+            source_text,
+            settings,
+            stock_settings,
+            at_ms,
+            interval_ms,
+        } => {
+            ensure!(
+                interval_ms.is_finite() && interval_ms >= 0. && interval_ms <= at_ms,
+                "invalid lathe interval"
+            );
+            let replay = swarf_preview::lathe::compile(&source_text, &settings)?;
+            let mut stock = swarf_preview::lathe_stock::Simulation::new(&replay, &stock_settings)?;
+            stock.advance(&replay, at_ms - interval_ms)?;
+            serde_json::to_vec(&stock.advance(&replay, at_ms)?)?
+        }
         Operation::LatheCompile {
             source_text,
             settings,

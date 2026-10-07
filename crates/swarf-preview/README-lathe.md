@@ -2,7 +2,8 @@
 
 The Rust `lathe::compile` and `lathe::seek` API and JSON operations `lathe_compile`
 and `lathe_seek` implement a bounded Mach3 Turn subset for gang tooling. This is
-nominal path replay, not lathe stock removal or a motion controller.
+nominal path replay. The separate [`lathe_stock` engine](README.md#turning-removal-and-whole-gang-checks)
+adds turning removal and whole gang checks; neither API is a motion controller.
 
 Run the synthetic fixture:
 
@@ -94,7 +95,8 @@ but these checks are not a continuous collision or certified travel envelope.
 Timing assumes constant commanded RPM/feed, with no acceleration, spindle lag,
 feedback, stops or macro delays. There is no chuck, holder, inactive insert,
 stock, nose compensation, threading synchronization or cutting-load model.
-The milling removal API explicitly rejects this carriage replay.
+The milling removal API explicitly rejects this carriage replay. Use the
+separate turning engine with explicit insert/holder and fixture geometry.
 
 Special cutting-force, power, thermal and machining calculations remain owned
 by Black Book. This adapter only resolves program coordinates and calls the
