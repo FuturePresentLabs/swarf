@@ -117,9 +117,10 @@ impl PostProcessor for Mach3Post {
                 last_f = f;
             }
 
-            // Add non-cycle lines as-is (but skip G80 - cancel cycle)
-            if !code.contains("G80") {
-                output_lines.push(line.clone());
+            // Expanded cycles need no standalone cancellation. Preserve combined
+            // safety blocks and strip old numbering before renumbering.
+            if code.trim() != "G80" {
+                output_lines.push(code.to_string());
             }
         }
 
@@ -174,6 +175,17 @@ fn extract_param(line: &str, param: char) -> Option<f64> {
 mod tests {
     use super::*;
     use crate::codegen::GCodeOutput;
+
+    #[test]
+    fn preserves_safety_block_with_single_sequence_number() {
+        let input = GCodeOutput {
+            lines: vec!["N0010 G90 G17 G40 G49 G80".into(), "N0020 G21".into()],
+            line_number: 30,
+            step: 10,
+        };
+        let output = Mach3Post.process(&input);
+        assert_eq!(output.lines, vec!["N0010 G90 G17 G40 G49 G80", "N0020 G21"]);
+    }
 
     #[test]
     fn test_mach3_converts_g83() {
