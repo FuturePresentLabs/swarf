@@ -1,6 +1,7 @@
 use anyhow::{Result, ensure};
 use serde::Deserialize;
 use std::io::{Read, Write};
+use swarf_preview::removal::{Removal, RemovalSettings};
 use swarf_preview::{Settings, compile, path_stl, seek};
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
@@ -19,6 +20,13 @@ enum Operation {
         settings: Settings,
         at_ms: f64,
         display_radius_mm: f64,
+    },
+    Removal {
+        source_text: String,
+        settings: Settings,
+        removal_settings: RemovalSettings,
+        at_ms: f64,
+        interval_ms: f64,
     },
 }
 #[derive(Deserialize)]
@@ -61,6 +69,22 @@ fn run() -> Result<()> {
             at_ms,
             display_radius_mm,
         } => path_stl(&compile(&source_text, &settings)?, at_ms, display_radius_mm)?,
+        Operation::Removal {
+            source_text,
+            settings,
+            removal_settings,
+            at_ms,
+            interval_ms,
+        } => {
+            ensure!(
+                interval_ms.is_finite() && interval_ms > 0. && interval_ms <= at_ms,
+                "interval must be positive and no greater than at_ms"
+            );
+            let preview = compile(&source_text, &settings)?;
+            let mut removal = Removal::new(&preview, &removal_settings)?;
+            removal.advance(&preview, at_ms - interval_ms)?;
+            serde_json::to_vec(&removal.advance(&preview, at_ms)?)?
+        }
     };
     std::io::stdout().lock().write_all(&output)?;
     Ok(())

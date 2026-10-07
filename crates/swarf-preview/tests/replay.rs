@@ -137,3 +137,49 @@ fn full_circle_deposition_is_a_layer_and_segment_budget_is_enforced() {
     }
     assert!(compile(&source, &settings(Family::Cnc)).is_err());
 }
+
+#[test]
+fn removal_cli_reports_requested_interval_and_rejects_invalid_interval() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut settings = settings(Family::Cnc);
+    settings.initial_xyz_mm = [5., 5., 0.];
+    let mut request = serde_json::json!({"schema":"swarf.preview-request.v1","request":{
+        "operation":"removal","source_text":"G21 G90 T1 M3\nG1 Z-2 F60", "settings":settings,
+        "removal_settings":{"stock_mm":[10,10,4],"voxel_mm":0.25,"tool_number":1,"tool_diameter_mm":2,"flute_length_mm":8},
+        "at_ms":2000,"interval_ms":1000}});
+    for valid in [true, false] {
+        if !valid {
+            request["request"]["interval_ms"] = serde_json::json!(3000);
+        }
+        let mut c = Command::new(env!("CARGO_BIN_EXE_swarf-preview"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        c.stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&request).unwrap())
+            .unwrap();
+        let out = c.wait_with_output().unwrap();
+        if valid {
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            near(report["interval_ms"].as_f64().unwrap(), 1000.);
+            near(
+                report["interval_mrr_mm3_min"].as_f64().unwrap(),
+                report["newly_removed_mm3"].as_f64().unwrap() * 60.,
+            );
+            assert_eq!(report["machine_output_enabled"], false);
+        } else {
+            assert_eq!(out.status.code(), Some(2));
+            assert!(out.stdout.is_empty());
+        }
+    }
+}

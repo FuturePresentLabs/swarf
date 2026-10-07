@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 pub const MAX_SOURCE: usize = 1024 * 1024;
+pub mod removal;
 pub const MAX_SEGMENTS: usize = 20_000;
 const MAX_DURATION_MS: f64 = 360_000_000.0;
 
@@ -14,7 +15,7 @@ pub enum Family {
     Cnc,
     Fff,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
     pub family: Family,
@@ -46,6 +47,7 @@ pub struct Segment {
     pub start_ms: f64,
     pub end_ms: f64,
     pub tool: Option<u32>,
+    pub spindle_on: Option<bool>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Preview {
@@ -186,7 +188,9 @@ pub fn compile(source: &str, settings: &Settings) -> Result<Preview> {
     let mut feed: Option<f64> = None;
     let mut tool = None;
     let mut ended = false;
+    let mut spindle = None;
     for (index, line) in source.lines().enumerate() {
+        let first_segment = preview.segments.len();
         ensure!(index < 100_000, "too many source blocks");
         let run = (|| -> Result<()> {
             let words = words(line)?;
@@ -275,6 +279,7 @@ pub fn compile(source: &str, settings: &Settings) -> Result<Preview> {
                         0
                     }
                     (Family::Cnc, 3..=5) => {
+                        spindle = Some(m != 5);
                         preview
                             .metadata
                             .push(format!("Line {}: spindle M{m} annotation only", index + 1));
@@ -553,6 +558,9 @@ pub fn compile(source: &str, settings: &Settings) -> Result<Preview> {
             Ok(())
         })();
         run.with_context(|| format!("source line {}", index + 1))?;
+        for segment in &mut preview.segments[first_segment..] {
+            segment.spindle_on = spindle;
+        }
     }
     ensure!(
         !preview.segments.is_empty(),
@@ -592,6 +600,7 @@ fn push(
         start_ms: start,
         end_ms: p.duration_ms,
         tool,
+        spindle_on: None,
     });
     Ok(())
 }
