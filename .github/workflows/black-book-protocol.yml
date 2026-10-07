@@ -1,0 +1,20 @@
+name: Public engineering contract
+on:
+  push:
+    paths: ["crates/black-book-protocol/**", ".github/workflows/black-book-protocol.yml"]
+  pull_request:
+    paths: ["crates/black-book-protocol/**", ".github/workflows/black-book-protocol.yml"]
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt --manifest-path crates/black-book-protocol/Cargo.toml --check
+      - run: cargo clippy --manifest-path crates/black-book-protocol/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path crates/black-book-protocol/Cargo.toml
+      - run: cargo package --manifest-path crates/black-book-protocol/Cargo.toml
