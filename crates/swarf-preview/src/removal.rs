@@ -46,6 +46,10 @@ impl Removal {
             "removal requires CNC program"
         );
         ensure!(
+            p.coordinate_scope == "program_space_explicit_initial_position_no_machine_offsets",
+            "vertical milling removal requires a milling replay, not lathe carriage motion"
+        );
+        ensure!(
             s.voxel_mm.is_finite() && (0.05..=2.).contains(&s.voxel_mm),
             "voxel must be .05..2mm"
         );

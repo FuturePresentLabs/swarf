@@ -6,6 +6,15 @@ use swarf_preview::{Settings, compile, path_stl, seek};
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 enum Operation {
+    LatheCompile {
+        source_text: String,
+        settings: swarf_preview::lathe::Settings,
+    },
+    LatheSeek {
+        source_text: String,
+        settings: swarf_preview::lathe::Settings,
+        at_ms: f64,
+    },
     Compile {
         source_text: String,
         settings: Settings,
@@ -54,6 +63,18 @@ fn run() -> Result<()> {
         "wrong request version"
     );
     let output = match request.request {
+        Operation::LatheCompile {
+            source_text,
+            settings,
+        } => serde_json::to_vec(&swarf_preview::lathe::compile(&source_text, &settings)?)?,
+        Operation::LatheSeek {
+            source_text,
+            settings,
+            at_ms,
+        } => serde_json::to_vec(&swarf_preview::lathe::seek(
+            &swarf_preview::lathe::compile(&source_text, &settings)?,
+            at_ms,
+        )?)?,
         Operation::Compile {
             source_text,
             settings,
