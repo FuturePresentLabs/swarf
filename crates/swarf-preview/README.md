@@ -59,3 +59,40 @@ The stdin CLI accepts `operation: "removal"`, normal source/settings, plus:
 It rebuilds stock to `at_ms - interval_ms` before reporting that interval, so agent
 requests can seek independently. Tool dimensions are explicit inputs; they are
 never inferred from unverified comments in posted G-code.
+
+## Explicit force and bulk heat estimates
+
+`physics::Estimator::new(preview, removal_settings, physics_settings)` binds one
+explicit positive cutting RPM (spindle S is retained per segment); variable
+cutting RPM is rejected until per-segment load integration is supported.
+`advance(removal_report)` derives interval cutting power from newly removed
+volume and a caller-supplied specific cutting energy range, then mean tangential
+force from surface speed and mean torque from angular speed. These scalar means
+are not XYZ force vectors or tooth/peak/chatter predictions.
+
+The one-node thermal estimate deposits an explicit fraction of midpoint cutting
+energy into remaining stock, removes the old-temperature stored energy carried
+by removed mass, and solves constant-interval heating/cooling analytically using
+a supplied stock-to-ambient conductance. Density and heat capacity derive thermal
+capacitance from remaining volume. Reports include all cumulative energy terms
+and a conservation residual. Interval-average deposition and end-of-interval
+mass are discretization assumptions; bulk temperature is not tool/chip/contact
+or local surface temperature. Fully removed stock rejects this stock-node model.
+
+All properties, heat partition, conductance and an assumption note are required;
+there are no inferred material/coolant defaults. Reports always say calibrated=false.
+Reference equations: [Sandvik metric milling power/torque](https://cdn.sandvik.coromant.com/files/sitecollectiondocuments/services/metal-cutting-e-learning/formulas-and-definitions/formulas-and-deinitions-for-milling-metric-enu.pdf)
+and [COMSOL lumped thermal capacitance](https://doc.comsol.com/6.3/doc/com.comsol.help.heat/heat_ug_theory.07.045.html).
+Black Book owns the equations. The default build links only its small protocol
+crate, with no calculation library or tables. Set `SWARF_BLACK_BOOK_BIN` to an
+absolute path to a precompiled `black-book-evaluate`, or opt into
+the integration's linked `black-book` feature (private wrapper). Public Swarf
+accepts an explicit evaluator through `in-process-provider`; it has no dependency
+on the proprietary library. Missing providers fail explicitly. Reports include
+provider version and external executable SHA-256. Inputs/output are bounded to
+4096 bytes and requests have a five-second deadline. Use an immutable versioned
+executable path. Material calibration and lumped-node validity remain unverified
+for the illustrative fixture.
+
+See the public [provider contract](../black-book-protocol/README.md). No
+GitHub release assets have been published yet; don't rely on invented URLs.

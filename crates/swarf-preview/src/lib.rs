@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 pub const MAX_SOURCE: usize = 1024 * 1024;
+pub mod physics;
 pub mod removal;
 pub const MAX_SEGMENTS: usize = 20_000;
 const MAX_DURATION_MS: f64 = 360_000_000.0;
@@ -48,6 +49,7 @@ pub struct Segment {
     pub end_ms: f64,
     pub tool: Option<u32>,
     pub spindle_on: Option<bool>,
+    pub spindle_rpm: Option<f64>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Preview {
@@ -189,6 +191,7 @@ pub fn compile(source: &str, settings: &Settings) -> Result<Preview> {
     let mut tool = None;
     let mut ended = false;
     let mut spindle = None;
+    let mut spindle_rpm = None;
     for (index, line) in source.lines().enumerate() {
         let first_segment = preview.segments.len();
         ensure!(index < 100_000, "too many source blocks");
@@ -330,7 +333,9 @@ pub fn compile(source: &str, settings: &Settings) -> Result<Preview> {
                     settings.family == Family::Cnc && m_group.contains(&1),
                     "unbound S word"
                 );
-                params.remove(&'S');
+                let rpm = params.remove(&'S').unwrap();
+                ensure!((0.0..=1000000.0).contains(&rpm), "invalid spindle RPM");
+                spindle_rpm = Some(rpm);
             }
             if let Some(h) = params.remove(&'H') {
                 ensure!(
@@ -560,6 +565,7 @@ pub fn compile(source: &str, settings: &Settings) -> Result<Preview> {
         run.with_context(|| format!("source line {}", index + 1))?;
         for segment in &mut preview.segments[first_segment..] {
             segment.spindle_on = spindle;
+            segment.spindle_rpm = spindle_rpm;
         }
     }
     ensure!(
@@ -601,6 +607,7 @@ fn push(
         end_ms: p.duration_ms,
         tool,
         spindle_on: None,
+        spindle_rpm: None,
     });
     Ok(())
 }
