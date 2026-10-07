@@ -5,6 +5,8 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 pub use swarf_stock::Mesh;
 use swarf_stock::VoxelGrid;
+mod setup;
+pub use setup::SetupTransform;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemovalSettings {

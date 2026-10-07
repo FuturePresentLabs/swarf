@@ -1349,10 +1349,10 @@ impl CodeGenerator {
     }
 
     fn emit_circle_pocket(&mut self, circ: &Circle, p: &PocketOp) {
-        let tool_radius = 3.0;
+        let tool_radius = self.current_tool_data.as_ref().map(|t| t.diameter / 2.0).unwrap_or(3.0);
         let radius = circ.diameter / 2.0 - tool_radius;
 
-        if radius <= 0.0 {
+        if radius < 0.0 {
             self.output.emit_comment("ERROR: Tool too large for pocket");
             return;
         }
@@ -1368,7 +1368,8 @@ impl CodeGenerator {
             // Spiral from center outward
             let num_spiral_passes = (radius / (tool_radius * 2.0 * p.stepover)).ceil() as i32;
 
-            // Start at center
+            // Transfer at clearance before descending in each depth pass.
+            self.output.emit("G00 Z50.0");
             self.output
                 .emit(&format!("G00 X{:.3} Y{:.3}", circ.center.x, circ.center.y));
             self.output
@@ -1377,7 +1378,9 @@ impl CodeGenerator {
             for spiral in 1..=num_spiral_passes {
                 let r = spiral as f64 * (radius / num_spiral_passes as f64);
 
-                // Arc around (simplified: just move to radius and do circle)
+                // Reach the arc start by feed before a complete circle. I/J
+                // are relative to that start, not the pocket center.
+                self.output.emit(&format!("G01 X{:.3} Y{:.3} F{:.1}", circ.center.x + r, circ.center.y, p.feed_rate));
                 self.output.emit(&format!(
                     "G03 X{:.3} Y{:.3} I{:.3} J{:.3} F{:.1}",
                     circ.center.x + r,
@@ -1653,6 +1656,23 @@ impl Default for GCodeOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_circle_replays_valid_arcs_without_rapid_stock_contact() {
+        use swarf_preview::{compile, Family, Settings, removal::{Removal,RemovalSettings}};
+        for diameter in [4., 18.] {
+            let mut generator=CodeGenerator::new();
+            generator.emit_tool_change(&ToolChange {tool_id:None, tool_number:1, tool_data:Some(ToolData {diameter:4.,length:20.,flutes:3,material:ToolMaterial::Carbide})});
+            generator.emit_spindle(&SpindleCommand {direction:SpindleDir::CW,rpm:1000.});
+            generator.emit_circle_pocket(&Circle {center:Position::new(20.,15.),diameter}, &PocketOp {geometry:Geometry::Circle(Circle {center:Position::new(20.,15.),diameter}),depth:4.,stepdown:2.,stepover:0.5,feed_rate:200.,plunge_feed:80.,finish_pass:None});
+            let source=format!("G21 G90\n{}",generator.output.to_string());
+            let preview=compile(&source,&Settings {family:Family::Cnc,initial_xyz_mm:[0.,0.,5.],initial_e_mm:0.,rapid_mm_min:3000.,arc_chord_tolerance_mm:0.02}).unwrap();
+            let mut stock=Removal::new(&preview,&RemovalSettings {stock_mm:[40.,30.,8.],voxel_mm:0.5,tool_number:1,tool_diameter_mm:4.,flute_length_mm:20.}).unwrap();
+            let report=stock.advance(&preview,preview.duration_ms).unwrap();
+            assert!(report.removed_mm3>0.);
+            assert!(report.rapid_contact_lines.is_empty());
+        }
+    }
+
 
     #[test]
     #[cfg(feature = "legacy-black-book")]
