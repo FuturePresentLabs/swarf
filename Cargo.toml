@@ -13,6 +13,7 @@ viz = ["dep:warp", "dep:tokio", "dep:notify", "dep:futures", "dep:image"]
 viz-3d = ["viz"]
 
 [dependencies]
+swarf-stock = { path = "crates/swarf-stock" }
 logos = "0.14"          # Lexer generation
 ariadne = "0.4"         # Error reporting
 thiserror = "1.0"       # Error handling

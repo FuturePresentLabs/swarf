@@ -2,12 +2,14 @@
 ///
 /// Vertex layout for a unit cube:
 ///
+/// ```text
 ///       4 ---- 5          Edge numbering:
 ///      /|     /|           0: 0→1   4: 4→5   8:  0→4
 ///     7 ---- 6 |           1: 1→2   5: 5→6   9:  1→5
 ///     | 0 -- | 1           2: 2→3   6: 6→7   10: 2→6
 ///     |/     |/            3: 3→0   7: 7→4   11: 3→7
 ///     3 ---- 2
+/// ```
 use super::{Mesh, VoxelGrid};
 
 /// Generate mesh from voxel grid using marching cubes.
@@ -484,9 +486,8 @@ mod tests {
 
     #[test]
     fn stock_grid_produces_closed_surface() {
-        use crate::ast::StockDef;
+        use crate::StockDimensions as StockDef;
         let stock = StockDef {
-            material: "6061".into(),
             size_x: 2.0,
             size_y: 2.0,
             size_z: 1.0,
