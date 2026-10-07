@@ -1,0 +1,15 @@
+[package]
+name = "black-book-protocol"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Public wire types for optional Black Book engineering providers; no formulas or reference data"
+repository = "https://github.com/FuturePresentLabs/swarf"
+readme = "README.md"
+include = ["src/**", "tests/**", "fixtures/**", "README.md", "LICENSE-*", "Cargo.toml"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
