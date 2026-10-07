@@ -208,6 +208,27 @@ mod tests {
         assert_eq!(old, back.occupied_centers());
     }
     #[test]
+    fn quarter_turn_supports_swapped_stock_dimensions() {
+        let a = preview(3., 2.);
+        let b = preview(3., 2.);
+        let mut stock = Removal::new(&a, &settings()).unwrap();
+        let first = stock.advance(&a, a.duration_ms).unwrap();
+        let mut cfg = settings();
+        cfg.stock_mm = [8., 10., 4.];
+        let turn = SetupTransform {
+            rotation: [[0, 1, 0], [-1, 0, 0], [0, 0, 1]],
+            translation_mm: [0., 10., 0.],
+        };
+        let mut next = stock.next_setup(&a, &b, &cfg, &turn).unwrap();
+        let start = next.advance(&b, 0.).unwrap();
+        assert_eq!(start.remaining_mm3, first.remaining_mm3);
+        assert_eq!(start.removed_mm3, first.removed_mm3);
+        assert!(next
+            .occupied_centers()
+            .iter()
+            .all(|p| p[0] > 0. && p[0] < 8. && p[1] > 0. && p[1] < 10.));
+    }
+    #[test]
     fn second_setup_adds_removal_without_restoring_first_cut() {
         let a = preview(3., 2.);
         let b = preview(7., 6.);
