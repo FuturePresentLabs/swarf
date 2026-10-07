@@ -139,9 +139,11 @@ impl VoxelGrid {
     /// A 1-voxel empty margin surrounds the stock on all sides so that
     /// marching cubes can detect the surface.
     pub fn from_stock(stock: &StockDef, voxel_size: f64) -> Self {
-        let nx = (stock.size_x / voxel_size).ceil() as usize + 2;
-        let ny = (stock.size_y / voxel_size).ceil() as usize + 2;
-        let nz = (stock.size_z / voxel_size).ceil() as usize + 2;
+        // Both stock endpoints are sampled (inclusive), plus one empty sample
+        // on each side. Without +3 the positive boundary is never surfaced.
+        let nx = (stock.size_x / voxel_size).ceil() as usize + 3;
+        let ny = (stock.size_y / voxel_size).ceil() as usize + 3;
+        let nz = (stock.size_z / voxel_size).ceil() as usize + 3;
 
         let origin = (-voxel_size, -voxel_size, -stock.size_z - voxel_size);
         let mut grid = Self::new(nx, ny, nz, voxel_size, origin);
@@ -243,14 +245,7 @@ impl VoxelGrid {
 
     /// Rectangular pocket centered at (cx, cy) with given width (X) and
     /// height (Y) from Z = 0 down to Z = -depth.
-    pub fn subtract_pocket_rect(
-        &mut self,
-        cx: f64,
-        cy: f64,
-        width: f64,
-        height: f64,
-        depth: f64,
-    ) {
+    pub fn subtract_pocket_rect(&mut self, cx: f64, cy: f64, width: f64, height: f64, depth: f64) {
         let hw = width / 2.0;
         let hh = height / 2.0;
         for vz in 0..self.depth {
@@ -333,12 +328,7 @@ pub fn generate_from_program(
                         );
                     }
                     PocketShape::Circle { diameter } => {
-                        grid.subtract_pocket_circle(
-                            p.position.x,
-                            p.position.y,
-                            *diameter,
-                            p.depth,
-                        );
+                        grid.subtract_pocket_circle(p.position.x, p.position.y, *diameter, p.depth);
                     }
                 }
                 snapshots.push(MeshSnapshot {
@@ -487,6 +477,36 @@ fn calculate_pattern_positions(pattern: &Pattern) -> Vec<Position> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stock_and_pocket_have_closed_surface_edges() {
+        for voxel in [0.125, 0.2] {
+            let mut grid = VoxelGrid::from_stock(&stock_4x3x075(), voxel);
+            for pocket in [false, true] {
+                if pocket {
+                    grid.subtract_pocket_rect(2.0, 1.5, 1.0, 1.0, 0.5);
+                }
+                let mesh = grid.to_mesh();
+                let mut edges = std::collections::BTreeMap::new();
+                for face in &mesh.triangles {
+                    let points = face.map(|i| mesh.vertices[i].map(f64::to_bits));
+                    for (a, b) in [
+                        (points[0], points[1]),
+                        (points[1], points[2]),
+                        (points[2], points[0]),
+                    ] {
+                        let edge = if a < b { (a, b) } else { (b, a) };
+                        *edges.entry(edge).or_insert(0usize) += 1;
+                    }
+                }
+                assert!(!edges.is_empty());
+                assert!(
+                    edges.values().all(|count| *count == 2),
+                    "open or nonmanifold stock surface: voxel={voxel}, pocket={pocket}"
+                );
+            }
+        }
+    }
 
     fn stock_4x3x075() -> StockDef {
         StockDef {

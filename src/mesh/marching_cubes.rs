@@ -75,9 +75,11 @@ fn process_cell(grid: &VoxelGrid, x: usize, y: usize, z: usize, mesh: &mut Mesh)
     let x0 = grid.origin.0 + x as f64 * vs;
     let y0 = grid.origin.1 + y as f64 * vs;
     let z0 = grid.origin.2 + z as f64 * vs;
-    let x1 = x0 + vs;
-    let y1 = y0 + vs;
-    let z1 = z0 + vs;
+    // Adjacent cells must calculate shared corners identically, even when
+    // voxel size is not exactly representable in binary (e.g. 0.2).
+    let x1 = grid.origin.0 + (x + 1) as f64 * vs;
+    let y1 = grid.origin.1 + (y + 1) as f64 * vs;
+    let z1 = grid.origin.2 + (z + 1) as f64 * vs;
     let xm = (x0 + x1) / 2.0;
     let ym = (y0 + y1) / 2.0;
     let zm = (z0 + z1) / 2.0;
