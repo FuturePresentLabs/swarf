@@ -10,6 +10,7 @@ mod parser;
 pub mod post;
 mod tool_library;
 mod validator;
+mod entry;
 
 #[cfg(feature = "viz")]
 mod viz;

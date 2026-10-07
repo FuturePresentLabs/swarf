@@ -47,6 +47,8 @@ pub struct CodeGenerator {
     stock: Option<StockDef>,
     max_rpm: Option<f64>,
     tool_library: Option<crate::tool_library::ToolLibrary>,
+    entry_defaults: crate::entry::Defaults,
+    entry_override: Option<crate::entry::Spec>,
 }
 
 impl CodeGenerator {
@@ -61,6 +63,8 @@ impl CodeGenerator {
             stock: None,
             max_rpm: None,
             tool_library: None,
+            entry_defaults: crate::entry::Defaults::default(),
+            entry_override: None,
         }
     }
 
@@ -202,10 +206,28 @@ impl CodeGenerator {
 
     fn emit_operation(&mut self, op: &Operation) {
         match op {
+            Operation::EntryProfile { target, spec } => {
+                self.entry_defaults.set(*target, spec.clone());
+                self.output.emit_comment(&format!(
+                    "PLUNGE_PROFILE {:?} {}",
+                    target,
+                    serde_json::to_string(spec).unwrap()
+                ));
+            }
+            Operation::WithEntry { spec, operation } => {
+                let old = self.entry_override.replace(spec.clone());
+                self.emit_operation(operation);
+                self.entry_override = old;
+            }
             Operation::ToolChange(tc) => self.emit_tool_change(tc),
             Operation::Spindle(sp) => self.emit_spindle(sp),
             Operation::Drill(d) => self.emit_drill(d),
-            Operation::Pocket(p) => self.emit_pocket(p),
+            Operation::Pocket(p) => {
+                if self.entry_defaults.pocket.is_some() {
+                    self.output.emit_comment("WARNING UNPROFILED_ENTRY: legacy pocket bypasses top-level profile; use v2 pocket");
+                }
+                self.emit_pocket(p)
+            }
             Operation::Profile(p) => self.emit_profile(p),
             Operation::Face(f) => self.emit_face(f),
             Operation::FaceV2(f) => self.emit_face_v2(f),
@@ -401,6 +423,31 @@ impl CodeGenerator {
     }
 
     fn emit_drill_v2(&mut self, drill: &DrillV2Op) {
+        if let Some(r) = self
+            .entry_defaults
+            .resolve(crate::entry::Target::Drill, self.entry_override.as_ref())
+        {
+            self.emit_entry_resolution(&r);
+            let depth = match drill.depth {
+                DrillDepth::Depth(v) => v,
+                DrillDepth::Thru => {
+                    self.stock
+                        .as_ref()
+                        .expect("validated stock for profiled thru")
+                        .size_z
+                }
+            };
+            let (rpm, _, _) = self.calculate_drill_params(drill.diameter, depth);
+            self.output.emit(&format!("S{:.0} M03", rpm));
+            for line in
+                crate::entry::moves(drill.position, depth, &r.effective).expect("validated entry")
+            {
+                self.output.emit(&line);
+            }
+            self.output
+                .emit(&format!("G00 Z{:.9}", r.effective.retract));
+            return;
+        }
         self.output.emit_comment(&format!(
             "DRILL dia:{} at X{:.4} Y{:.4}",
             drill.diameter, drill.position.x, drill.position.y
@@ -445,6 +492,12 @@ impl CodeGenerator {
     }
 
     fn emit_pocket_v2(&mut self, pocket: &PocketV2Op) {
+        if let Some(r) = self
+            .entry_defaults
+            .resolve(crate::entry::Target::Pocket, self.entry_override.as_ref())
+        {
+            self.emit_entry_resolution(&r);
+        }
         // Get tool diameter (from current tool or default)
         let tool_dia = self
             .current_tool_data
@@ -532,7 +585,12 @@ impl CodeGenerator {
         }
 
         // Retract
-        self.output.emit("G00 Z0.1");
+        let retract = self
+            .entry_defaults
+            .resolve(crate::entry::Target::Pocket, self.entry_override.as_ref())
+            .map(|r| r.effective.retract)
+            .unwrap_or(0.1);
+        self.output.emit(&format!("G00 Z{}", retract));
     }
 
     fn emit_drill_pattern(&mut self, drill: &DrillPatternOp) {
@@ -544,7 +602,8 @@ impl CodeGenerator {
 
         // Generate drill operations for each position
         for (i, pos) in positions.iter().enumerate() {
-            self.output.emit_comment(&format!("Hole {} at X{:.3} Y{:.3}", i + 1, pos.x, pos.y));
+            self.output
+                .emit_comment(&format!("Hole {} at X{:.3} Y{:.3}", i + 1, pos.x, pos.y));
 
             let drill_op = DrillV2Op {
                 diameter: drill.diameter,
@@ -689,13 +748,24 @@ impl CodeGenerator {
         let min_y = center_y - half_height;
         let max_y = center_y + half_height;
 
-        // Rapid to start position (center of pocket)
-        self.output
-            .emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
+        if let Some(r) = self
+            .entry_defaults
+            .resolve(crate::entry::Target::Pocket, self.entry_override.as_ref())
+        {
+            for line in crate::entry::moves(Position::new(center_x, center_y), depth, &r.effective)
+                .expect("validated entry")
+            {
+                self.output.emit(&line);
+            }
+        } else {
+            // Rapid to start position (center of pocket)
+            self.output
+                .emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
 
-        // Plunge to depth
-        self.output
-            .emit(&format!("G01 Z-{:.4} F{:.1}", depth, feed_rate * 0.3));
+            // Plunge to depth
+            self.output
+                .emit(&format!("G01 Z-{:.4} F{:.1}", depth, feed_rate * 0.3));
+        }
 
         // Calculate number of Y steps
         let y_range = max_y - min_y;
@@ -755,13 +825,24 @@ impl CodeGenerator {
         // Calculate number of spiral passes
         let num_passes = (pocket_radius / stepover).ceil() as i32;
 
-        // Rapid to center
-        self.output
-            .emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
+        if let Some(r) = self
+            .entry_defaults
+            .resolve(crate::entry::Target::Pocket, self.entry_override.as_ref())
+        {
+            for line in crate::entry::moves(Position::new(center_x, center_y), depth, &r.effective)
+                .expect("validated entry")
+            {
+                self.output.emit(&line);
+            }
+        } else {
+            // Rapid to center
+            self.output
+                .emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
 
-        // Plunge to depth
-        self.output
-            .emit(&format!("G01 Z-{:.4} F{:.1}", depth, feed_rate * 0.3));
+            // Plunge to depth
+            self.output
+                .emit(&format!("G01 Z-{:.4} F{:.1}", depth, feed_rate * 0.3));
+        }
 
         // Spiral outward
         let points_per_rev = 36; // 10-degree increments
@@ -801,9 +882,13 @@ impl CodeGenerator {
                     flute_count: tool.flutes,
                     tool_material: match tool.material {
                         crate::ast::ToolMaterial::HSS => crate::black_book::ToolMaterial::HSS,
-                        crate::ast::ToolMaterial::Carbide => crate::black_book::ToolMaterial::Carbide,
+                        crate::ast::ToolMaterial::Carbide => {
+                            crate::black_book::ToolMaterial::Carbide
+                        }
                         crate::ast::ToolMaterial::Cobalt => crate::black_book::ToolMaterial::Cobalt,
-                        crate::ast::ToolMaterial::Ceramic => crate::black_book::ToolMaterial::Ceramic,
+                        crate::ast::ToolMaterial::Ceramic => {
+                            crate::black_book::ToolMaterial::Ceramic
+                        }
                     },
                     corner_radius: None,
                     coating: None,
@@ -814,7 +899,8 @@ impl CodeGenerator {
                     radial_engagement_pct: 20.0,
                 };
                 if let Ok(params) = self.black_book.calculate(material, &bb_tool, &engagement) {
-                    let (_, feed) = self.apply_rpm_limit(params.rpm as f64, params.feed_rate_ipm * 0.5);
+                    let (_, feed) =
+                        self.apply_rpm_limit(params.rpm as f64, params.feed_rate_ipm * 0.5);
                     return feed;
                 }
             }
@@ -825,13 +911,15 @@ impl CodeGenerator {
     fn emit_chamfer(&mut self, chamfer: &ChamferOp) {
         use crate::ast::ChamferGeometry;
 
-        self.output.emit_comment(&format!(
-            "CHAMFER - width: {:.3}",
-            chamfer.width
-        ));
+        self.output
+            .emit_comment(&format!("CHAMFER - width: {:.3}", chamfer.width));
 
         // Get tool diameter for calculations
-        let tool_dia = self.current_tool_data.as_ref().map(|t| t.diameter).unwrap_or(0.25);
+        let tool_dia = self
+            .current_tool_data
+            .as_ref()
+            .map(|t| t.diameter)
+            .unwrap_or(0.25);
         let feed_rate = self.calculate_chamfer_feed();
 
         // Calculate chamfer depth (Z) based on width (45° chamfer)
@@ -846,20 +934,26 @@ impl CodeGenerator {
                 let center_y = chamfer.position.y;
 
                 // Start at bottom-left corner (offset by tool radius)
-                let start_x = center_x - half_width + tool_dia/2.0;
-                let start_y = center_y - half_height + tool_dia/2.0;
-                let end_x = center_x + half_width - tool_dia/2.0;
-                let end_y = center_y + half_height - tool_dia/2.0;
+                let start_x = center_x - half_width + tool_dia / 2.0;
+                let start_y = center_y - half_height + tool_dia / 2.0;
+                let end_x = center_x + half_width - tool_dia / 2.0;
+                let end_y = center_y + half_height - tool_dia / 2.0;
 
                 // Rapid to start position at safe height
-                self.output.emit(&format!("G00 X{:.4} Y{:.4}", start_x, start_y));
+                self.output
+                    .emit(&format!("G00 X{:.4} Y{:.4}", start_x, start_y));
                 self.output.emit("G00 Z0.1");
 
                 // Plunge to chamfer depth
-                self.output.emit(&format!("G01 Z-{:.4} F{:.1}", chamfer_depth, feed_rate * 0.3));
+                self.output.emit(&format!(
+                    "G01 Z-{:.4} F{:.1}",
+                    chamfer_depth,
+                    feed_rate * 0.3
+                ));
 
                 // Cut around rectangle
-                self.output.emit(&format!("G01 X{:.4} F{:.1}", end_x, feed_rate));
+                self.output
+                    .emit(&format!("G01 X{:.4} F{:.1}", end_x, feed_rate));
                 self.output.emit(&format!("G01 Y{:.4}", end_y));
                 self.output.emit(&format!("G01 X{:.4}", start_x));
                 self.output.emit(&format!("G01 Y{:.4}", start_y));
@@ -869,16 +963,21 @@ impl CodeGenerator {
             }
             ChamferGeometry::Circle { diameter } => {
                 // Chamfer around circle perimeter
-                let radius = diameter / 2.0 - tool_dia/2.0;
+                let radius = diameter / 2.0 - tool_dia / 2.0;
                 let center_x = chamfer.position.x;
                 let center_y = chamfer.position.y;
 
                 // Rapid to start position
-                self.output.emit(&format!("G00 X{:.4} Y{:.4}", center_x + radius, center_y));
+                self.output
+                    .emit(&format!("G00 X{:.4} Y{:.4}", center_x + radius, center_y));
                 self.output.emit("G00 Z0.1");
 
                 // Plunge to chamfer depth
-                self.output.emit(&format!("G01 Z-{:.4} F{:.1}", chamfer_depth, feed_rate * 0.3));
+                self.output.emit(&format!(
+                    "G01 Z-{:.4} F{:.1}",
+                    chamfer_depth,
+                    feed_rate * 0.3
+                ));
 
                 // Cut circle
                 self.output.emit(&format!(
@@ -900,11 +999,16 @@ impl CodeGenerator {
                 let center_y = chamfer.position.y;
 
                 // Rapid to center
-                self.output.emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
+                self.output
+                    .emit(&format!("G00 X{:.4} Y{:.4}", center_x, center_y));
                 self.output.emit("G00 Z0.1");
 
                 // Plunge to chamfer depth
-                self.output.emit(&format!("G01 Z-{:.4} F{:.1}", chamfer_depth, feed_rate * 0.3));
+                self.output.emit(&format!(
+                    "G01 Z-{:.4} F{:.1}",
+                    chamfer_depth,
+                    feed_rate * 0.3
+                ));
 
                 // Cut outward spiral for chamfer
                 let points_per_rev = 36;
@@ -915,7 +1019,8 @@ impl CodeGenerator {
                     let r = r.min(radius);
                     let x = center_x + r * angle.cos();
                     let y = center_y + r * angle.sin();
-                    self.output.emit(&format!("G01 X{:.4} Y{:.4} F{:.1}", x, y, feed_rate));
+                    self.output
+                        .emit(&format!("G01 X{:.4} Y{:.4} F{:.1}", x, y, feed_rate));
                     if r >= radius {
                         break;
                     }
@@ -935,13 +1040,15 @@ impl CodeGenerator {
     fn emit_deburr(&mut self, deburr: &DeburrOp) {
         use crate::ast::DeburrGeometry;
 
-        self.output.emit_comment(&format!(
-            "DEBURR - pass depth: {:.3}",
-            deburr.pass_depth
-        ));
+        self.output
+            .emit_comment(&format!("DEBURR - pass depth: {:.3}", deburr.pass_depth));
 
         // Get tool diameter for calculations
-        let tool_dia = self.current_tool_data.as_ref().map(|t| t.diameter).unwrap_or(0.125);
+        let tool_dia = self
+            .current_tool_data
+            .as_ref()
+            .map(|t| t.diameter)
+            .unwrap_or(0.125);
         let feed_rate = self.calculate_deburr_feed();
 
         let pass_depth = deburr.pass_depth;
@@ -949,8 +1056,8 @@ impl CodeGenerator {
         match &deburr.geometry {
             DeburrGeometry::Rect { width, height } => {
                 // Deburr around rectangle perimeter
-                let half_width = width / 2.0 + tool_dia/2.0;
-                let half_height = height / 2.0 + tool_dia/2.0;
+                let half_width = width / 2.0 + tool_dia / 2.0;
+                let half_height = height / 2.0 + tool_dia / 2.0;
                 let center_x = deburr.position.x;
                 let center_y = deburr.position.y;
 
@@ -960,14 +1067,17 @@ impl CodeGenerator {
                 let end_y = center_y + half_height;
 
                 // Rapid to start
-                self.output.emit(&format!("G00 X{:.4} Y{:.4}", start_x, start_y));
+                self.output
+                    .emit(&format!("G00 X{:.4} Y{:.4}", start_x, start_y));
                 self.output.emit("G00 Z0.05"); // Start just above surface
 
                 // Plunge to deburr depth
-                self.output.emit(&format!("G01 Z-{:.4} F{:.1}", pass_depth, feed_rate * 0.3));
+                self.output
+                    .emit(&format!("G01 Z-{:.4} F{:.1}", pass_depth, feed_rate * 0.3));
 
                 // Light cut around perimeter
-                self.output.emit(&format!("G01 X{:.4} F{:.1}", end_x, feed_rate));
+                self.output
+                    .emit(&format!("G01 X{:.4} F{:.1}", end_x, feed_rate));
                 self.output.emit(&format!("G01 Y{:.4}", end_y));
                 self.output.emit(&format!("G01 X{:.4}", start_x));
                 self.output.emit(&format!("G01 Y{:.4}", start_y));
@@ -977,13 +1087,15 @@ impl CodeGenerator {
             }
             DeburrGeometry::Circle { diameter } => {
                 // Deburr around circle
-                let radius = diameter / 2.0 + tool_dia/2.0;
+                let radius = diameter / 2.0 + tool_dia / 2.0;
                 let center_x = deburr.position.x;
                 let center_y = deburr.position.y;
 
-                self.output.emit(&format!("G00 X{:.4} Y{:.4}", center_x + radius, center_y));
+                self.output
+                    .emit(&format!("G00 X{:.4} Y{:.4}", center_x + radius, center_y));
                 self.output.emit("G00 Z0.05");
-                self.output.emit(&format!("G01 Z-{:.4} F{:.1}", pass_depth, feed_rate * 0.3));
+                self.output
+                    .emit(&format!("G01 Z-{:.4} F{:.1}", pass_depth, feed_rate * 0.3));
 
                 // Cut circle
                 self.output.emit(&format!(
@@ -1000,24 +1112,28 @@ impl CodeGenerator {
             DeburrGeometry::Profile => {
                 // Deburr the part profile - requires stock knowledge
                 // For now, just comment that this would use stock bounds
-                self.output.emit_comment("DEBURR PROFILE - requires stock definition");
-                
+                self.output
+                    .emit_comment("DEBURR PROFILE - requires stock definition");
+
                 // If we have stock defined, use those bounds
                 if let Some(ref stock) = self.stock {
                     let center_x = deburr.position.x;
                     let center_y = deburr.position.y;
-                    let half_width = stock.size_x / 2.0 + tool_dia/2.0;
-                    let half_height = stock.size_y / 2.0 + tool_dia/2.0;
+                    let half_width = stock.size_x / 2.0 + tool_dia / 2.0;
+                    let half_height = stock.size_y / 2.0 + tool_dia / 2.0;
 
                     let start_x = center_x - half_width;
                     let start_y = center_y - half_height;
                     let end_x = center_x + half_width;
                     let end_y = center_y + half_height;
 
-                    self.output.emit(&format!("G00 X{:.4} Y{:.4}", start_x, start_y));
+                    self.output
+                        .emit(&format!("G00 X{:.4} Y{:.4}", start_x, start_y));
                     self.output.emit("G00 Z0.05");
-                    self.output.emit(&format!("G01 Z-{:.4} F{:.1}", pass_depth, feed_rate * 0.3));
-                    self.output.emit(&format!("G01 X{:.4} F{:.1}", end_x, feed_rate));
+                    self.output
+                        .emit(&format!("G01 Z-{:.4} F{:.1}", pass_depth, feed_rate * 0.3));
+                    self.output
+                        .emit(&format!("G01 X{:.4} F{:.1}", end_x, feed_rate));
                     self.output.emit(&format!("G01 Y{:.4}", end_y));
                     self.output.emit(&format!("G01 X{:.4}", start_x));
                     self.output.emit(&format!("G01 Y{:.4}", start_y));
@@ -1068,6 +1184,30 @@ impl CodeGenerator {
     }
 
     fn emit_drill(&mut self, d: &DrillOp) {
+        if d.peck_depth.is_some() && self.entry_defaults.drill.is_some() {
+            self.output.emit_comment("WARNING INLINE_LEGACY_PECK_BYPASSES_PROFILE: explicit legacy peck/retract/feed retained");
+        }
+        if d.peck_depth.is_none() {
+            if let Some(r) = self
+                .entry_defaults
+                .resolve(crate::entry::Target::Drill, self.entry_override.as_ref())
+            {
+                self.emit_entry_resolution(&r);
+                for pos in &d.positions {
+                    for line in
+                        crate::entry::moves(*pos, d.depth, &r.effective).expect("validated entry")
+                    {
+                        self.output.emit(&line);
+                    }
+                    if let Some(t) = d.dwell {
+                        self.output.emit(&format!("G04 P{}", t));
+                    }
+                    self.output
+                        .emit(&format!("G00 Z{:.9}", r.effective.retract));
+                }
+                return;
+            }
+        }
         self.output.emit_comment("DRILL CYCLE");
 
         // Rapid to retract height
@@ -1105,6 +1245,21 @@ impl CodeGenerator {
 
         // Retract to safe Z
         self.output.emit(&format!("G00 Z{:.3}", d.retract_height));
+    }
+    fn emit_entry_resolution(&mut self, r: &crate::entry::Resolution) {
+        self.output.emit_comment(&format!(
+            "ENTRY_RESOLUTION {}",
+            serde_json::to_string(r).unwrap()
+        ));
+        for warning in &r.warnings {
+            self.output.emit_comment(&format!(
+                "WARNING {}: effective entry from inline line {} overrides top-level profile",
+                warning, r.effective.source_line
+            ));
+        }
+        if matches!(r.effective.strategy, crate::entry::Strategy::Helix { .. }) {
+            self.output.emit_comment("ENTRY_ASSUMPTION: helix requires a center-cutting milling tool; tool capability is not hardware-qualified");
+        }
     }
 
     fn emit_pocket(&mut self, p: &PocketOp) {
@@ -1437,7 +1592,7 @@ impl CodeGenerator {
 
         // Generate positions from pattern
         let positions = t.pattern.generate_positions();
-        
+
         // Get depth value
         let depth = match t.depth {
             DrillDepth::Thru => 10.0, // Should get from stock
@@ -1500,6 +1655,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(feature = "legacy-black-book")]
     fn test_black_book_integration() {
         let mut gen = CodeGenerator::new();
 
@@ -1517,7 +1673,8 @@ mod tests {
         gen.emit_setup(&setup);
 
         // Tool change with carbide end mill
-        let tool_change = ToolChange { tool_id: None,
+        let tool_change = ToolChange {
+            tool_id: None,
             tool_number: 1,
             tool_data: Some(ToolData {
                 diameter: 0.25,
@@ -1562,7 +1719,8 @@ mod tests {
         gen.emit_setup(&setup);
 
         // Tool change with face mill
-        let tool_change = ToolChange { tool_id: None,
+        let tool_change = ToolChange {
+            tool_id: None,
             tool_number: 1,
             tool_data: Some(ToolData {
                 diameter: 1.0,
@@ -1588,6 +1746,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-black-book")]
     fn test_cutting_parameters_summary() {
         let mut gen = CodeGenerator::new();
 
@@ -1606,7 +1765,8 @@ mod tests {
         gen.current_material = setup.material;
 
         // Tool change
-        let tool_change = ToolChange { tool_id: None,
+        let tool_change = ToolChange {
+            tool_id: None,
             tool_number: 1,
             tool_data: Some(ToolData {
                 diameter: 0.25,
@@ -1648,7 +1808,8 @@ mod tests {
         gen.current_material = setup.material;
 
         // Tool change with end mill
-        let tool_change = ToolChange { tool_id: None,
+        let tool_change = ToolChange {
+            tool_id: None,
             tool_number: 1,
             tool_data: Some(ToolData {
                 diameter: 0.5,
@@ -1711,7 +1872,8 @@ mod tests {
         gen.current_material = setup.material;
 
         // Tool change with end mill
-        let tool_change = ToolChange { tool_id: None,
+        let tool_change = ToolChange {
+            tool_id: None,
             tool_number: 1,
             tool_data: Some(ToolData {
                 diameter: 0.25,
@@ -1767,7 +1929,8 @@ mod tests {
         gen.current_material = setup.material;
 
         // Tool change with smaller end mill (deeper cuts)
-        let tool_change = ToolChange { tool_id: None,
+        let tool_change = ToolChange {
+            tool_id: None,
             tool_number: 1,
             tool_data: Some(ToolData {
                 diameter: 0.25,
@@ -1822,7 +1985,8 @@ mod tests {
         gen.current_material = setup.material;
 
         // Tool change with large end mill
-        let tool_change = ToolChange { tool_id: None,
+        let tool_change = ToolChange {
+            tool_id: None,
             tool_number: 1,
             tool_data: Some(ToolData {
                 diameter: 1.0, // Large tool

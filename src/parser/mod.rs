@@ -141,7 +141,20 @@ impl Parser {
                 break;
             }
 
-            let op = match self.peek() {
+            let mut op = match self.peek() {
+                Some(Token::EntryProfile) => {
+                    self.advance();
+                    let target = match self.peek() {
+                        Some(Token::Drill) => crate::entry::Target::Drill,
+                        Some(Token::Pocket) => crate::entry::Target::Pocket,
+                        _ => return Err(self.error("plunge-profile needs drill or pocket target")),
+                    };
+                    self.advance();
+                    Operation::EntryProfile {
+                        target,
+                        spec: self.parse_entry_spec()?,
+                    }
+                }
                 Some(Token::Tool) => self.parse_tool_change()?,
                 Some(Token::Spindle) => self.parse_spindle()?,
                 Some(Token::Drill) => {
@@ -213,10 +226,60 @@ impl Parser {
                 None => break,
             };
 
+            if self.peek() == Some(&Token::Entry) {
+                self.advance();
+                let spec = self.parse_entry_spec()?;
+                op = Operation::WithEntry {
+                    spec,
+                    operation: Box::new(op),
+                };
+            }
             ops.push(op);
         }
 
         Ok(ops)
+    }
+    fn parse_entry_spec(&mut self) -> Result<crate::entry::Spec> {
+        use crate::entry::{Spec, Strategy};
+        let source_line = self.current_line;
+        let strategy = match self.peek() {
+            Some(Token::Direct) => {
+                self.advance();
+                Strategy::Direct
+            }
+            Some(Token::Peck) => {
+                self.advance();
+                let depth = self.expect_number_or_fraction()?;
+                self.consume(Token::Clearance)?;
+                Strategy::Peck {
+                    depth,
+                    clearance: self.expect_number_or_fraction()?,
+                }
+            }
+            Some(Token::Helix) => {
+                self.advance();
+                self.consume(Token::Radius)?;
+                let radius = self.expect_number_or_fraction()?;
+                self.consume(Token::Pitch)?;
+                Strategy::Helix {
+                    radius,
+                    pitch: self.expect_number_or_fraction()?,
+                }
+            }
+            _ => return Err(self.error("entry needs direct, peck or helix")),
+        };
+        self.consume(Token::Retract)?;
+        let retract = self.expect_number_or_fraction()?;
+        self.consume(Token::Feed)?;
+        let feed = self.expect_number_or_fraction()?;
+        let spec = Spec {
+            strategy,
+            retract,
+            feed,
+            source_line,
+        };
+        spec.validate().map_err(|e| self.error(&e))?;
+        Ok(spec)
     }
 
     fn is_drill_v2(&self) -> bool {
@@ -268,8 +331,11 @@ impl Parser {
         // Look ahead for "pattern" keyword after drill v2 syntax
         // drill <dia> at ... depth ... pattern ...
         let mut pos = self.position + 1; // Skip 'drill'
-        // Skip diameter
-        if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Fraction(_), _))) {
+                                         // Skip diameter
+        if matches!(
+            self.tokens.get(pos),
+            Some((Token::Number(_) | Token::Fraction(_), _))
+        ) {
             pos += 1;
         }
         // Skip 'at' and position
@@ -277,21 +343,33 @@ impl Parser {
             pos += 1;
         }
         // Skip position (1-2 tokens for zero/stock or numbers)
-        if matches!(self.tokens.get(pos), Some((Token::Identifier(_) | Token::Zero | Token::Stock, _))) {
+        if matches!(
+            self.tokens.get(pos),
+            Some((Token::Identifier(_) | Token::Zero | Token::Stock, _))
+        ) {
             pos += 1;
         } else {
             // Skip two numbers for x y
-            if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Fraction(_), _))) {
+            if matches!(
+                self.tokens.get(pos),
+                Some((Token::Number(_) | Token::Fraction(_), _))
+            ) {
                 pos += 1;
             }
-            if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Fraction(_), _))) {
+            if matches!(
+                self.tokens.get(pos),
+                Some((Token::Number(_) | Token::Fraction(_), _))
+            ) {
                 pos += 1;
             }
         }
         // Skip depth if present
         if matches!(self.tokens.get(pos), Some((Token::Depth | Token::Thru, _))) {
             pos += 1;
-            if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Fraction(_), _))) {
+            if matches!(
+                self.tokens.get(pos),
+                Some((Token::Number(_) | Token::Fraction(_), _))
+            ) {
                 pos += 1;
             }
         }
@@ -303,13 +381,19 @@ impl Parser {
         // Look ahead for "pattern" keyword after pocket v2 syntax
         // pocket rect <w> <h> <d> at ... pattern ...
         let mut pos = self.position + 1; // Skip 'pocket'
-        // Skip shape keyword if present
-        if matches!(self.tokens.get(pos), Some((Token::Rect | Token::Rectangle | Token::Circle, _))) {
+                                         // Skip shape keyword if present
+        if matches!(
+            self.tokens.get(pos),
+            Some((Token::Rect | Token::Rectangle | Token::Circle, _))
+        ) {
             pos += 1;
         }
         // Skip 3 numbers (width, height/depth, depth)
         for _ in 0..3 {
-            if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Fraction(_), _))) {
+            if matches!(
+                self.tokens.get(pos),
+                Some((Token::Number(_) | Token::Fraction(_), _))
+            ) {
                 pos += 1;
             }
         }
@@ -318,13 +402,22 @@ impl Parser {
             pos += 1;
         }
         // Skip position
-        if matches!(self.tokens.get(pos), Some((Token::Identifier(_) | Token::Zero | Token::Stock, _))) {
+        if matches!(
+            self.tokens.get(pos),
+            Some((Token::Identifier(_) | Token::Zero | Token::Stock, _))
+        ) {
             pos += 1;
         } else {
-            if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Fraction(_), _))) {
+            if matches!(
+                self.tokens.get(pos),
+                Some((Token::Number(_) | Token::Fraction(_), _))
+            ) {
                 pos += 1;
             }
-            if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Fraction(_), _))) {
+            if matches!(
+                self.tokens.get(pos),
+                Some((Token::Number(_) | Token::Fraction(_), _))
+            ) {
                 pos += 1;
             }
         }
@@ -400,7 +493,7 @@ impl Parser {
 
     fn parse_tool_change(&mut self) -> Result<Operation> {
         self.consume(Token::Tool)?;
-        
+
         // Accept either a number (traditional) or identifier (tool library ID)
         let (tool_num, tool_id) = match self.peek() {
             Some(Token::Number(n)) => {
@@ -414,7 +507,11 @@ impl Parser {
                 // For string IDs, we'll use 0 as placeholder - codegen will resolve
                 (0, Some(id_str))
             }
-            _ => return Err(self.error("expected tool number or tool ID (e.g., 'tool 1' or 'tool EM_250_4FL')")),
+            _ => {
+                return Err(self.error(
+                    "expected tool number or tool ID (e.g., 'tool 1' or 'tool EM_250_4FL')",
+                ))
+            }
         };
 
         let tool_data = if self.peek() == Some(&Token::Diameter) {
@@ -684,7 +781,10 @@ impl Parser {
             // Check if there's a pattern keyword after the size and at
             let mut pos = self.position + 1;
             // Skip the tap size (could be number or identifier like "1/4-20")
-            if matches!(self.tokens.get(pos), Some((Token::Number(_) | Token::Identifier(_), _))) {
+            if matches!(
+                self.tokens.get(pos),
+                Some((Token::Number(_) | Token::Identifier(_), _))
+            ) {
                 pos += 1;
             }
             // Skip "at"
@@ -770,19 +870,19 @@ impl Parser {
     fn calculate_pitch_from_size(size: &str) -> f64 {
         // Common imperial and metric thread pitches
         match size {
-            "1/4-20" => 0.05,      // 20 TPI = 0.05"
-            "1/4-28" => 0.0357,    // 28 TPI
-            "5/16-18" => 0.0556,   // 18 TPI
-            "5/16-24" => 0.0417,   // 24 TPI
-            "3/8-16" => 0.0625,    // 16 TPI
-            "3/8-24" => 0.0417,    // 24 TPI
-            "M4" => 0.7,           // mm
-            "M5" => 0.8,           // mm
-            "M6" => 1.0,           // mm
-            "M8" => 1.25,          // mm
-            "M10" => 1.5,          // mm
-            "M12" => 1.75,         // mm
-            _ => 0.05,              // Default
+            "1/4-20" => 0.05,    // 20 TPI = 0.05"
+            "1/4-28" => 0.0357,  // 28 TPI
+            "5/16-18" => 0.0556, // 18 TPI
+            "5/16-24" => 0.0417, // 24 TPI
+            "3/8-16" => 0.0625,  // 16 TPI
+            "3/8-24" => 0.0417,  // 24 TPI
+            "M4" => 0.7,         // mm
+            "M5" => 0.8,         // mm
+            "M6" => 1.0,         // mm
+            "M8" => 1.25,        // mm
+            "M10" => 1.5,        // mm
+            "M12" => 1.75,       // mm
+            _ => 0.05,           // Default
         }
     }
 
@@ -792,7 +892,7 @@ impl Parser {
             "1/4-20" | "1/4-28" => 0.25,
             "5/16-18" | "5/16-24" => 0.3125,
             "3/8-16" | "3/8-24" => 0.375,
-            "M4" => 4.0 / 25.4,    // Convert mm to inches
+            "M4" => 4.0 / 25.4, // Convert mm to inches
             "M5" => 5.0 / 25.4,
             "M6" => 6.0 / 25.4,
             "M8" => 8.0 / 25.4,
@@ -1243,22 +1343,26 @@ impl Parser {
         let width = self.expect_number_or_fraction()?;
 
         // Parse geometry type
-        let geometry = if self.peek() == Some(&Token::Rect) || self.peek() == Some(&Token::Rectangle) {
-            self.advance();
-            let w = self.expect_number_or_fraction()?;
-            let h = self.expect_number_or_fraction()?;
-            ChamferGeometry::Rect { width: w, height: h }
-        } else if self.peek() == Some(&Token::Circle) {
-            self.advance();
-            let dia = self.expect_number_or_fraction()?;
-            ChamferGeometry::Circle { diameter: dia }
-        } else if self.peek() == Some(&Token::Hole) {
-            self.advance();
-            let dia = self.expect_number_or_fraction()?;
-            ChamferGeometry::Hole { diameter: dia }
-        } else {
-            return Err(self.error("expected rect, circle, or hole for chamfer geometry"));
-        };
+        let geometry =
+            if self.peek() == Some(&Token::Rect) || self.peek() == Some(&Token::Rectangle) {
+                self.advance();
+                let w = self.expect_number_or_fraction()?;
+                let h = self.expect_number_or_fraction()?;
+                ChamferGeometry::Rect {
+                    width: w,
+                    height: h,
+                }
+            } else if self.peek() == Some(&Token::Circle) {
+                self.advance();
+                let dia = self.expect_number_or_fraction()?;
+                ChamferGeometry::Circle { diameter: dia }
+            } else if self.peek() == Some(&Token::Hole) {
+                self.advance();
+                let dia = self.expect_number_or_fraction()?;
+                ChamferGeometry::Hole { diameter: dia }
+            } else {
+                return Err(self.error("expected rect, circle, or hole for chamfer geometry"));
+            };
 
         self.consume(Token::At)?;
         let position = self.parse_at_position()?;
@@ -1277,21 +1381,25 @@ impl Parser {
         let pass_depth = self.expect_number_or_fraction()?;
 
         // Parse geometry type
-        let geometry = if self.peek() == Some(&Token::Rect) || self.peek() == Some(&Token::Rectangle) {
-            self.advance();
-            let w = self.expect_number_or_fraction()?;
-            let h = self.expect_number_or_fraction()?;
-            DeburrGeometry::Rect { width: w, height: h }
-        } else if self.peek() == Some(&Token::Circle) {
-            self.advance();
-            let dia = self.expect_number_or_fraction()?;
-            DeburrGeometry::Circle { diameter: dia }
-        } else if self.peek() == Some(&Token::Profile) {
-            self.advance();
-            DeburrGeometry::Profile
-        } else {
-            return Err(self.error("expected rect, circle, or profile for deburr geometry"));
-        };
+        let geometry =
+            if self.peek() == Some(&Token::Rect) || self.peek() == Some(&Token::Rectangle) {
+                self.advance();
+                let w = self.expect_number_or_fraction()?;
+                let h = self.expect_number_or_fraction()?;
+                DeburrGeometry::Rect {
+                    width: w,
+                    height: h,
+                }
+            } else if self.peek() == Some(&Token::Circle) {
+                self.advance();
+                let dia = self.expect_number_or_fraction()?;
+                DeburrGeometry::Circle { diameter: dia }
+            } else if self.peek() == Some(&Token::Profile) {
+                self.advance();
+                DeburrGeometry::Profile
+            } else {
+                return Err(self.error("expected rect, circle, or profile for deburr geometry"));
+            };
 
         self.consume(Token::At)?;
         let position = self.parse_at_position()?;
@@ -1575,7 +1683,7 @@ impl Parser {
 
     fn parse_arc_pattern(&mut self) -> Result<Pattern> {
         self.consume(Token::Arc)?;
-        
+
         // Parse: arc <count> radius <radius> center at <x> <y> starting at <angle> to <angle>
         let count = self.expect_number_or_fraction()? as u32;
 

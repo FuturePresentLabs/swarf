@@ -98,15 +98,13 @@ pub fn validate_parameters(
                 });
             }
         }
-        MaterialCategory::HighTempAlloy => {
-            if params.doc > tool.diameter * 0.2 {
+        MaterialCategory::HighTempAlloy if params.doc > tool.diameter * 0.2 => {
                 issues.push(ValidationIssue {
                     severity: Severity::Warning,
                     code: "NICKEL_ALLOY_DOC".to_string(),
                     message: "Deep cuts cause rapid tool wear in nickel alloys".to_string(),
                     suggestion: Some("Use multiple shallow passes".to_string()),
                 });
-            }
         }
         _ => {}
     }

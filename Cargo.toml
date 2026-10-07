@@ -9,6 +9,7 @@ build = "build.rs"
 
 [features]
 default = []
+legacy-black-book = []
 viz = ["dep:warp", "dep:tokio", "dep:notify", "dep:futures", "dep:image"]
 viz-3d = ["viz"]
 
@@ -33,6 +34,7 @@ cgmath = "0.18.0"
 uom = { version = "0.37.0", features = ["f64", "si"] }
 
 [dev-dependencies]
+swarf-preview = {path="crates/swarf-preview"}
 pretty_assertions = "1.4"
 
 [[bin]]

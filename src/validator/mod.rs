@@ -55,6 +55,11 @@ impl Validator {
         program: &crate::ast::Program,
     ) -> Result<(), Vec<ValidationError>> {
         let mut errors = Vec::new();
+        errors.extend(
+            crate::entry::validate(program)
+                .into_iter()
+                .map(|message| ValidationError::Geometry { message }),
+        );
 
         for op in &program.operations {
             if let Err(e) = self.validate_operation(op) {
@@ -73,6 +78,9 @@ impl Validator {
         use crate::ast::*;
 
         match op {
+            #[cfg(not(feature = "legacy-black-book"))]
+            Operation::DrillV2(_) | Operation::PocketV2(_) | Operation::DrillPattern(_) | Operation::PocketPattern(_) | Operation::Cut(_) | Operation::Clear(_) | Operation::Chamfer(_) | Operation::Deburr(_) | Operation::FaceV2(_) => Err(ValidationError::Geometry { message: "automatic cutting parameters require the opt-in legacy-black-book feature; use explicit-feed operations in the default build".into() }),
+            Operation::WithEntry { operation, .. } => self.validate_operation(operation),
             Operation::ToolChange(tc) => {
                 if let Some(data) = &tc.tool_data {
                     if data.diameter <= 0.0 {
@@ -196,5 +204,18 @@ impl Validator {
             }
             _ => Ok(()),
         }
+    }
+}
+#[cfg(all(test, not(feature = "legacy-black-book")))]
+mod optional_tables_tests {
+    #[test]
+    fn default_rejects_automatic_parameters_but_accepts_explicit_feeds() {
+        let parse = |s: &str| crate::parser::Parser::new(crate::lexer::lex(s)).parse().unwrap();
+        let automatic = parse("units metric\ndrill 4 at 5 5 depth 3\n");
+        let errors = super::Validator::new().validate_program(&automatic).unwrap_err();
+        assert!(errors.iter().any(|e| e.to_string().contains("legacy-black-book")));
+        assert!(crate::black_book::BlackBook::new().list_materials().is_empty());
+        let explicit = parse("units metric\nspindle cw rpm 3000\ndrill at x 5 y 5 depth 3 retract 5 feed 60\n");
+        super::Validator::new().validate_program(&explicit).unwrap();
     }
 }

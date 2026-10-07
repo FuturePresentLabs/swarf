@@ -63,6 +63,7 @@ pub fn generate_from_program(
     });
 
     for op in &program.operations {
+        let op=match op {Operation::WithEntry{operation,..}=>operation.as_ref(),other=>other};
         match op {
             Operation::FaceV2(f) => {
                 grid.subtract_face(f.depth);

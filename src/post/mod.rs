@@ -80,6 +80,10 @@ pub fn g83_to_long_form(
     q_peck: f64,
     feed: f64,
 ) -> Vec<String> {
+    g83_to_long_form_with_clearance(x,y,r_plane,z_depth,q_peck,feed,0.05)
+}
+
+pub fn g83_to_long_form_with_clearance(x:f64,y:f64,r_plane:f64,z_depth:f64,q_peck:f64,feed:f64,clearance:f64)->Vec<String>{
     let mut lines = Vec::new();
 
     // Position
@@ -100,7 +104,7 @@ pub fn g83_to_long_form(
         if i < num_pecks {
             lines.push(format!("G00 Z{:.4}", r_plane));
             // Rapid back to just above last depth for next peck
-            let rapid_to = peck_depth - 0.05;
+            let rapid_to = peck_depth - clearance;
             if rapid_to > 0.0 {
                 lines.push(format!("G00 Z-{:.4}", rapid_to));
             }

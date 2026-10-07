@@ -16,10 +16,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[cfg(feature = "legacy-black-book")]
 pub mod calculations;
 pub mod materials;
+#[cfg(feature = "legacy-black-book")]
 pub mod validators;
 
+#[cfg(feature = "legacy-black-book")]
 pub use calculations::*;
 pub use materials::*;
 
@@ -89,7 +92,10 @@ pub struct BlackBook {
 impl BlackBook {
     pub fn new() -> Self {
         Self {
+            #[cfg(feature = "legacy-black-book")]
             materials: materials::load_material_database(),
+            #[cfg(not(feature = "legacy-black-book"))]
+            materials: HashMap::new(),
         }
     }
 
@@ -100,15 +106,26 @@ impl BlackBook {
         tool: &ToolGeometry,
         engagement: &Engagement,
     ) -> Result<CuttingParameters, BlackBookError> {
-        let material = self
-            .materials
-            .get(material_name)
-            .ok_or(BlackBookError::UnknownMaterial(material_name.to_string()))?;
+        #[cfg(not(feature = "legacy-black-book"))]
+        {
+            let _ = (material_name, tool, engagement);
+            Err(BlackBookError::CalculationError(
+                "legacy Black Book tables disabled; enable legacy-black-book explicitly".into(),
+            ))
+        }
+        #[cfg(feature = "legacy-black-book")]
+        {
+            let material = self
+                .materials
+                .get(material_name)
+                .ok_or(BlackBookError::UnknownMaterial(material_name.to_string()))?;
 
-        calculations::compute_parameters(material, tool, engagement)
+            calculations::compute_parameters(material, tool, engagement)
+        }
     }
 
     /// Get recommended chip load for tool diameter
+    #[cfg(feature = "legacy-black-book")]
     pub fn get_chip_load(
         &self,
         material_name: &str,
@@ -128,6 +145,7 @@ impl BlackBook {
     }
 
     /// Get SFM range for material and tool
+    #[cfg(feature = "legacy-black-book")]
     pub fn get_sfm_range(
         &self,
         material_name: &str,
@@ -183,7 +201,7 @@ impl std::fmt::Display for BlackBookError {
 
 impl std::error::Error for BlackBookError {}
 
-#[cfg(test)]
+#[cfg(all(test, feature = "legacy-black-book"))]
 mod tests {
     use super::*;
 

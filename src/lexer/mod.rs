@@ -9,6 +9,16 @@ use logos::Logos;
 #[logos(skip r"[ \t\f]+")] // Skip whitespace
 #[logos(error = LexerError)]
 pub enum Token {
+    #[token("plunge-profile")]
+    EntryProfile,
+    #[token("entry")]
+    Entry,
+    #[token("helix")]
+    Helix,
+    #[token("clearance")]
+    Clearance,
+    #[token("direct")]
+    Direct,
     // Literals
     #[regex(r"-?\d+\.?\d*", |lex| lex.slice().parse::<f64>().ok())]
     Number(Option<f64>),

@@ -49,6 +49,7 @@ pub struct MaterialData {
 }
 
 /// Load the complete material database
+#[cfg(feature = "legacy-black-book")]
 pub fn load_material_database() -> std::collections::HashMap<String, MaterialData> {
     let mut db = std::collections::HashMap::new();
 
@@ -509,10 +510,12 @@ pub fn load_material_database() -> std::collections::HashMap<String, MaterialDat
 }
 
 /// Standard tool diameters in inches (for chip load lookup)
+#[cfg(feature = "legacy-black-book")]
 pub const TOOL_DIAMETERS: [f64; 8] = [0.125, 0.1875, 0.25, 0.375, 0.5, 0.625, 0.75, 1.0];
 
 /// Get chip load factor based on radial engagement
 /// Accounts for chip thinning at low radial engagement
+#[cfg(feature = "legacy-black-book")]
 pub fn get_engagement_factor(radial_engagement_pct: f64) -> f64 {
     // Chip thinning formula: factor increases as engagement decreases
     // Based on the relationship: actual_chip_thickness = IPT * sqrt(engagement/100)

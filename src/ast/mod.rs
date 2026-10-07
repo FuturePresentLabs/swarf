@@ -55,6 +55,8 @@ pub enum CoolantMode {
 /// Top-level machining operations
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operation {
+    EntryProfile {target:crate::entry::Target,spec:crate::entry::Spec},
+    WithEntry {spec:crate::entry::Spec,operation:Box<Operation>},
     ToolChange(ToolChange),
     Spindle(SpindleCommand),
     Drill(DrillOp),
