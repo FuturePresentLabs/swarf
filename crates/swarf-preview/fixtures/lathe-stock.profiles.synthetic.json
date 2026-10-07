@@ -1,0 +1,159 @@
+{
+  "stock_radius_mm": 12,
+  "stock_z_mm": [
+    -25,
+    0
+  ],
+  "cell_mm": 0.25,
+  "clearance_mm": 0.1,
+  "angular_segments": 32,
+  "geometry_basis": "Synthetic convex insert/holder profiles; not measured shop geometry. Same annular stock engine.",
+  "tools": [
+    {
+      "tool_number": 1,
+      "offset_number": 1,
+      "insert": {
+        "id": "insert",
+        "min_mm": [
+          0,
+          -0.5,
+          -0.125
+        ],
+        "max_mm": [
+          3,
+          0.5,
+          0.125
+        ],
+        "profile_xz_mm": [
+          [
+            0,
+            0
+          ],
+          [
+            3,
+            -0.125
+          ],
+          [
+            3,
+            0.125
+          ]
+        ]
+      },
+      "holders": [
+        {
+          "id": "holder",
+          "min_mm": [
+            3,
+            -1,
+            0.5
+          ],
+          "max_mm": [
+            10,
+            1,
+            2.5
+          ],
+          "profile_xz_mm": [
+            [
+              3,
+              0.5
+            ],
+            [
+              10,
+              0.5
+            ],
+            [
+              10,
+              2.5
+            ],
+            [
+              5,
+              2.5
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "tool_number": 2,
+      "offset_number": 2,
+      "insert": {
+        "id": "insert",
+        "min_mm": [
+          0,
+          -0.5,
+          -0.125
+        ],
+        "max_mm": [
+          3,
+          0.5,
+          0.125
+        ],
+        "profile_xz_mm": [
+          [
+            0,
+            0
+          ],
+          [
+            3,
+            -0.125
+          ],
+          [
+            3,
+            0.125
+          ]
+        ]
+      },
+      "holders": [
+        {
+          "id": "holder",
+          "min_mm": [
+            3,
+            -1,
+            0.5
+          ],
+          "max_mm": [
+            10,
+            1,
+            2.5
+          ],
+          "profile_xz_mm": [
+            [
+              3,
+              0.5
+            ],
+            [
+              10,
+              0.5
+            ],
+            [
+              10,
+              2.5
+            ],
+            [
+              5,
+              2.5
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "chuck",
+      "radius_mm": 16,
+      "z_mm": [
+        -38,
+        -25
+      ]
+    },
+    {
+      "id": "spindle",
+      "radius_mm": 20,
+      "z_mm": [
+        -65,
+        -38
+      ]
+    }
+  ]
+}

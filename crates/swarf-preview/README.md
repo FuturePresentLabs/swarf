@@ -105,7 +105,7 @@ on spindle-on feed segments and removes each cell once; its exact annular weight
 is used for volume and interval MRR. `mesh()` revolves exposed cell faces about Z.
 API coordinates are physical [radial X, circumferential Y, axial Z] millimeters.
 
-Every mounted tool requires an explicit insert box and 1–8 holder boxes, plus
+Every mounted tool requires an explicit insert envelope and 1–8 holder envelopes, plus
 1–8 named chuck/spindle/fixture cylinders and geometry provenance. Tool-relative
 boxes follow the owner's resolved carriage offsets. Rigid body overlap between
 different mounted tools rejects the configuration. Initially engaged stock or
@@ -115,11 +115,13 @@ spindle-on feed insert may cut stock; rapid contact and holder/inactive contact
 latch an immediate geometric stop. Nothing moves or removes after that cursor.
 Cells removed earlier in a segment are considered before later body contacts.
 
-Checks are conservative **against the modeled cell stock**: a ring cell is
-bounded by a solid cylinder to its outer radius, so hollows and detailed holder
-shapes can produce false positives. The clearance margin includes arc chord
-tolerance. Removal uses cell centers, so boundary accuracy depends on resolution;
-the box insert is not a nose-radius/edge model. No spindle phase, acceleration,
+Checks are conservative **against the modeled cell stock**, preserving the
+inner void of each occupied annular cell. Bodies wholly inside a bore clear;
+continuous wall crossings are detected on either side of the axis. Radial/axial
+projection and bounding extents can still overestimate contact when extrema
+occur at different axial locations. The clearance margin includes arc chord
+tolerance. Removal uses cell centers, so boundary accuracy depends on resolution.
+No spindle phase, acceleration,
 braking distance, backlash, deflection, forces or heat are predicted. Synthetic
 fixtures do not establish real-machine clearance. Reports always retain
 `collision_qualified:false` and `machine_output_enabled:false`.
@@ -137,3 +139,23 @@ the original `lathe-gang.request.json` is retained as an adverse geometry case.
 Analytical annulus/facing volume, split-clock invariance, thin swept obstacles,
 active holders, inactive inserts, initial interference and failure atomicity are
 verified by tests. Shop geometry and installed Mach3 behavior remain unqualified.
+
+An envelope may add `profile_xz_mm`: 3–16 strictly convex counterclockwise
+`[radial X, axial Z]` vertices, extruded through its Y bounds. The profile must
+match the X/Z bounds, which are validated as a consistency check. Cutting sweeps
+use its half-planes; fixture and stock contact use continuous separating axes;
+mounted-body checks use both profiles. `Envelope::mesh()` exports that same
+perimeter for display, so the renderer does not invent body geometry. Legacy
+envelopes still use rectangles. Concave, self-intersecting, clockwise, collinear,
+nonfinite and inconsistent profiles fail. Curved edges require explicit faceted
+geometry; no automatic nose-radius compensation is claimed. See
+`fixtures/lathe-stock.profiles.synthetic.json` and `lathe-gang-profile.request.json`.
+
+Reports include `geometry_accuracy`: cell size, center-to-corner classification
+scale, maximum stock-mesh radial sagitta, explicit clearance/arc tolerance and
+profile-body count. The classification scale is **not a proven global volume or
+surface error bound**. A non-grid-aligned OD fixture is checked at .5, .25, .125
+and .0625 mm cells against analytic volume; the finest result is within 1% for
+that fixture. This does not imply monotonic convergence for every cut. Mesh tests
+verify closed edges, outward volume and nonzero triangles before and after boring.
+The circular seam shares exact vertices, and axial caps omit degenerate triangles.

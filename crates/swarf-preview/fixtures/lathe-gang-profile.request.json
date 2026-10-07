@@ -1,0 +1,52 @@
+{
+  "schema": "swarf.preview-request.v1",
+  "request": {
+    "operation": "lathe_compile",
+    "source_text": "(Synthetic gang: clearance transfers in front of stock; not a machine program)\nG21 G18 G90 G95 G97 S1000 M3\nT0101\nG0 X28 Z2\nG1 Z-0.125 F0.1\nX0\nG1 Z2\nG0 X28\nX20\nG1 Z-15 F0.15\nG1 X28 F0.1\nG0 Z2\nT0202\nG0 X28\nG1 X18 F0.1\nZ-10\nG1 X28 F0.1\nG0 Z2\nM5\nM30\n",
+    "settings": {
+      "tool_change_policy": "offset_selection_only",
+      "x_mode": "diameter",
+      "arc_i_mode": "radius",
+      "arc_center_mode": "incremental",
+      "initial_carriage_xz_mm": [
+        15,
+        5
+      ],
+      "work_origin_xz_mm": [
+        0,
+        0
+      ],
+      "carriage_limits_xz_mm": [
+        [
+          -50,
+          50
+        ],
+        [
+          -100,
+          50
+        ]
+      ],
+      "rapid_mm_min": 600,
+      "max_spindle_rpm": 3000,
+      "arc_chord_tolerance_mm": 0.01,
+      "gang_tools": [
+        {
+          "tool_number": 1,
+          "offset_number": 1,
+          "tip_from_carriage_xz_mm": [
+            0,
+            0
+          ]
+        },
+        {
+          "tool_number": 2,
+          "offset_number": 2,
+          "tip_from_carriage_xz_mm": [
+            40,
+            0
+          ]
+        }
+      ]
+    }
+  }
+}

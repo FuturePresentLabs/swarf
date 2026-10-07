@@ -267,3 +267,108 @@ fn json_cli_returns_owner_report_and_rejects_incomplete_geometry() {
     assert!(!bad.status.success());
     assert!(bad.stdout.is_empty());
 }
+
+#[test]
+fn bored_void_clears_following_holder_and_rapid_retract() {
+    let (r, mut s) = single("G0 X0 Z2\nG1 Z-9.875 F0.1\nX-1\nG0 Z2\n");
+    s.tools[0].insert.max_mm[0] = 3.;
+    s.tools[0].holders[0].min_mm = [-1., -1., 1.];
+    s.tools[0].holders[0].max_mm = [1., 1., 3.];
+    let mut sim = Simulation::new(&r, &s).unwrap();
+    let f = sim.advance(&r, r.carriage.duration_ms).unwrap();
+    assert!(!f.stopped, "{:?}", f.first_contact);
+    close(f.removed_mm3, std::f64::consts::PI * 9. * 10.);
+    let mut split = Simulation::new(&r, &s).unwrap();
+    for seg in &r.carriage.segments {
+        let f = split.advance(&r, seg.end_ms).unwrap();
+        assert!(!f.stopped, "{:?}", f.first_contact);
+    }
+    close(
+        split
+            .advance(&r, r.carriage.duration_ms)
+            .unwrap()
+            .removed_mm3,
+        f.removed_mm3,
+    );
+}
+#[test]
+fn nonaligned_od_removal_converges_and_reports_its_discretization() {
+    let (r, mut s) = single("G0 X24 Z2\nG1 X16.16 F0.1\nZ-12\n");
+    let truth = std::f64::consts::PI * (100. - 8.08_f64.powi(2)) * 10.;
+    let mut errors = vec![];
+    for h in [0.5, 0.25, 0.125, 0.0625] {
+        s.cell_mm = h;
+        let f = Simulation::new(&r, &s)
+            .unwrap()
+            .advance(&r, r.carriage.duration_ms)
+            .unwrap();
+        assert!(!f.stopped, "{:?}", f.first_contact);
+        errors.push((f.removed_mm3 - truth).abs());
+        close(
+            f.geometry_accuracy.cell_center_to_corner_mm,
+            h / 2_f64.sqrt(),
+        );
+        assert!(!f.geometry_accuracy.calibrated);
+    }
+    assert!(errors[3] < errors[0], "{errors:?}");
+    assert!(errors[3] / truth < 0.01, "{errors:?}");
+}
+#[test]
+fn profiled_fixture_is_consistent_in_whole_and_split_sweeps() {
+    let v: Value =
+        serde_json::from_str(include_str!("../fixtures/lathe-gang-profile.request.json")).unwrap();
+    let settings = serde_json::from_value(v["request"]["settings"].clone()).unwrap();
+    let r = lathe::compile(v["request"]["source_text"].as_str().unwrap(), &settings).unwrap();
+    let s: lathe_stock::Settings = serde_json::from_str(include_str!(
+        "../fixtures/lathe-stock.profiles.synthetic.json"
+    ))
+    .unwrap();
+    let mut sim = Simulation::new(&r, &s).unwrap();
+    let f = sim.advance(&r, r.carriage.duration_ms).unwrap();
+    assert!(!f.stopped, "{:?}", f.first_contact);
+    assert_eq!(f.geometry_accuracy.profile_bodies, 4);
+    assert!(f.removed_mm3 > 2000.);
+    let mut split = Simulation::new(&r, &s).unwrap();
+    for seg in &r.carriage.segments {
+        let report = split.advance(&r, seg.end_ms).unwrap();
+        assert!(!report.stopped, "{:?}", report.first_contact);
+    }
+    let end = split.advance(&r, r.carriage.duration_ms).unwrap();
+    close(end.removed_mm3, f.removed_mm3);
+}
+#[test]
+fn bored_stock_mesh_is_closed_and_has_no_zero_area_triangles() {
+    use std::collections::BTreeMap;
+    let (r, mut s) = single("G0 X0 Z2\nG1 Z-9.875 F0.1\n");
+    s.tools[0].insert.max_mm[0] = 3.;
+    s.tools[0].holders[0].min_mm = [-1., -1., 1.];
+    s.tools[0].holders[0].max_mm = [1., 1., 3.];
+    let mut sim = Simulation::new(&r, &s).unwrap();
+    for time in [0., r.carriage.duration_ms] {
+        let f = sim.advance(&r, time).unwrap();
+        assert!(!f.stopped);
+        let mesh = sim.mesh().unwrap();
+        let mut edges = BTreeMap::new();
+        let key = |p: [f64; 3]| p.map(|v| if v == 0. { 0 } else { v.to_bits() });
+        for tri in &mesh.triangles {
+            let [a, b, c] = tri.map(|i| mesh.vertices[i]);
+            let u = std::array::from_fn::<_, 3, _>(|i| b[i] - a[i]);
+            let v = std::array::from_fn::<_, 3, _>(|i| c[i] - a[i]);
+            let cross = [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ];
+            assert!(cross.iter().map(|v| v * v).sum::<f64>() > 1e-16);
+            for (a, b) in [(a, b), (b, c), (c, a)] {
+                let mut k = [key(a), key(b)];
+                k.sort();
+                *edges.entry(k).or_insert(0) += 1;
+            }
+        }
+        assert!(
+            edges.values().all(|&count| count == 2),
+            "open or nonmanifold edge"
+        );
+    }
+}

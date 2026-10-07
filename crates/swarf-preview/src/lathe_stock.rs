@@ -8,6 +8,8 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use swarf_stock::Mesh;
+mod geometry;
+use geometry::{annular_contact_entry, bodies_overlap, cut_entry, validate_profile};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -16,6 +18,9 @@ pub struct Envelope {
     /// Bounds relative to the tool tip, physical [radial X, circumferential Y, axial Z].
     pub min_mm: [f64; 3],
     pub max_mm: [f64; 3],
+    /// Optional strictly convex CCW [X,Z] perimeter, extruded through Y bounds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_xz_mm: Option<Vec<[f64; 2]>>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -74,6 +79,18 @@ pub struct Report {
     pub scope: &'static str,
     pub machine_output_enabled: bool,
     pub collision_qualified: bool,
+    pub geometry_accuracy: GeometryAccuracy,
+}
+#[derive(Debug, Serialize)]
+pub struct GeometryAccuracy {
+    pub cell_mm: f64,
+    /// Classification scale, not a proven surface or volume error bound.
+    pub cell_center_to_corner_mm: f64,
+    pub stock_mesh_radial_sagitta_mm: f64,
+    pub clearance_mm: f64,
+    pub arc_chord_tolerance_mm: f64,
+    pub profile_bodies: usize,
+    pub calibrated: bool,
 }
 #[derive(Clone)]
 pub struct Simulation {
@@ -112,7 +129,7 @@ fn validate_envelope(e: &Envelope) -> Result<()> {
             "invalid envelope bounds"
         );
     }
-    Ok(())
+    validate_profile(e)
 }
 // Slab clipping returns the first point of a segment in an inclusive XZ rectangle.
 fn entry(a: [f64; 2], b: [f64; 2], low: [f64; 2], high: [f64; 2]) -> Option<f64> {
@@ -135,21 +152,7 @@ fn entry(a: [f64; 2], b: [f64; 2], low: [f64; 2], high: [f64; 2]) -> Option<f64>
     }
     Some(lo)
 }
-fn cut_entry(a: [f64; 2], b: [f64; 2], e: &Envelope, r: f64, z: f64) -> Option<f64> {
-    [r, -r]
-        .into_iter()
-        .filter_map(|x| {
-            entry(
-                a,
-                b,
-                [x - e.max_mm[0], z - e.max_mm[2]],
-                [x - e.min_mm[0], z - e.min_mm[2]],
-            )
-        })
-        .min_by(f64::total_cmp)
-}
-// Conservative meridional bound of an AABB versus a solid of revolution.
-// Annular stock cells use their outer radius (the hollow interior is over-approximated).
+// Solid fixtures are the zero-inner-radius case of the same annular geometry.
 fn contact_entry(
     a: [f64; 2],
     b: [f64; 2],
@@ -158,22 +161,7 @@ fn contact_entry(
     z: [f64; 2],
     margin: f64,
 ) -> Option<f64> {
-    let y = if e.min_mm[1] <= 0. && e.max_mm[1] >= 0. {
-        0.
-    } else {
-        e.min_mm[1].abs().min(e.max_mm[1].abs())
-    };
-    let r = radius + margin;
-    if y > r {
-        return None;
-    }
-    let x = (r * r - y * y).max(0.).sqrt();
-    entry(
-        a,
-        b,
-        [-x - e.max_mm[0], z[0] - margin - e.max_mm[2]],
-        [x - e.min_mm[0], z[1] + margin - e.min_mm[2]],
-    )
+    annular_contact_entry(a, b, e, [0., radius], z, margin)
 }
 impl Simulation {
     pub fn new(replay: &Replay, s: &Settings) -> Result<Self> {
@@ -283,14 +271,7 @@ impl Simulation {
                 let b = tip_offset(other);
                 for ea in std::iter::once(&tool.insert).chain(&tool.holders) {
                     for eb in std::iter::once(&other.insert).chain(&other.holders) {
-                        let oa = [a[0], 0., a[1]];
-                        let ob = [b[0], 0., b[1]];
-                        let overlap = (0..3).all(|axis| {
-                            oa[axis] + ea.min_mm[axis]
-                                <= ob[axis] + eb.max_mm[axis] + s.clearance_mm
-                                && ob[axis] + eb.min_mm[axis]
-                                    <= oa[axis] + ea.max_mm[axis] + s.clearance_mm
-                        });
+                        let overlap = bodies_overlap(a, ea, b, eb, s.clearance_mm);
                         ensure!(
                             !overlap,
                             "mounted gang body envelopes overlap or violate clearance: T{} {} / T{} {}",
@@ -397,9 +378,25 @@ impl Simulation {
             first_contact: next.first_contact.clone(),
             gang_tools_checked: next.settings.tools.len(),
             frame: lathe::seek(replay, next.at_ms)?,
-            scope: "annular_cell_center_removal_conservative_swept_aabb_clearance_instant_replay_stop_no_machine_braking",
+            scope: "annular_cell_center_removal_convex_profile_sweeps_conservative_annular_clearance_instant_replay_stop_no_machine_braking",
             machine_output_enabled: false,
             collision_qualified: false,
+            geometry_accuracy: GeometryAccuracy {
+                cell_mm: next.settings.cell_mm,
+                cell_center_to_corner_mm: next.settings.cell_mm / 2.0_f64.sqrt(),
+                stock_mesh_radial_sagitta_mm: next.settings.stock_radius_mm
+                    * (1. - (std::f64::consts::PI / next.settings.angular_segments as f64).cos()),
+                clearance_mm: next.settings.clearance_mm,
+                arc_chord_tolerance_mm: replay.settings.arc_chord_tolerance_mm,
+                profile_bodies: next
+                    .settings
+                    .tools
+                    .iter()
+                    .flat_map(|t| std::iter::once(&t.insert).chain(&t.holders))
+                    .filter(|e| e.profile_xz_mm.is_some())
+                    .count(),
+                calibrated: false,
+            },
         };
         *self = next;
         Ok(report)
@@ -430,7 +427,9 @@ impl Simulation {
                 .settings
                 .tools
                 .iter()
-                .map(|t| 1 + t.holders.len())
+                .flat_map(|t| std::iter::once(&t.insert).chain(&t.holders))
+                // Charge each bounded separating-axis predicate; each projection has <=16 vertices.
+                .map(|e| e.profile_xz_mm.as_ref().map_or(1, |p| 1 + p.len()))
                 .sum::<usize>();
             let cost = self
                 .solid
@@ -529,11 +528,11 @@ impl Simulation {
                         }
                         let r = index % self.nr;
                         let z = index / self.nr;
-                        if let Some(t) = contact_entry(
+                        if let Some(t) = annular_contact_entry(
                             a,
                             b,
                             body,
-                            (r + 1) as f64 * h,
+                            [r as f64 * h, (r + 1) as f64 * h],
                             [
                                 self.settings.stock_z_mm[0] + z as f64 * h,
                                 self.settings.stock_z_mm[0] + (z + 1) as f64 * h,
@@ -612,7 +611,11 @@ impl Simulation {
                     );
                     for i in 0..n {
                         let a = i as f64 * std::f64::consts::TAU / n as f64;
-                        let b = (i + 1) as f64 * std::f64::consts::TAU / n as f64;
+                        let b = if i + 1 == n {
+                            0.
+                        } else {
+                            (i + 1) as f64 * std::f64::consts::TAU / n as f64
+                        };
                         let p = |r: f64, z: f64, t: f64| [r * t.cos(), r * t.sin(), z];
                         let points = if face < 2 {
                             let radius = radii[face];
@@ -634,10 +637,14 @@ impl Simulation {
                         let reverse = face == 0 || face == 2;
                         if reverse {
                             mesh.add_triangle(points[0], points[2], points[1]);
-                            mesh.add_triangle(points[0], points[3], points[2]);
+                            if face < 2 || r > 0 {
+                                mesh.add_triangle(points[0], points[3], points[2]);
+                            }
                         } else {
                             mesh.add_triangle(points[0], points[1], points[2]);
-                            mesh.add_triangle(points[0], points[2], points[3]);
+                            if face < 2 || r > 0 {
+                                mesh.add_triangle(points[0], points[2], points[3]);
+                            }
                         }
                     }
                 }
