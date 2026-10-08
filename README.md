@@ -9,8 +9,9 @@
 Natural language → DSL → Validated G-code for CNC machining.
 
 The separate [waterjet library](crates/swarf-waterjet/README.md) accepts Transmog
-profiles and produces typed centreline operation drafts. It has no controller
-output and does not use milling feeds or spindle assumptions.
+profiles and produces typed centreline drafts, compensated contour CAM, and
+explicit research G-code for WAZER and LinuxCNC waterjets. It does not use milling
+feeds or spindle assumptions; exported files remain unqualified for hardware.
 
 ## Why?
 
