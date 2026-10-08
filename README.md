@@ -199,14 +199,16 @@ swarf generates controller-specific G-code:
 | Post-Processor | Description |
 |----------------|-------------|
 | `generic` | Fanuc-compatible (default) |
-| `mach3` | Mach3/Mach4 (expands canned cycles to long-form) |
+| `mach3` / `mach3-mill` | Absolute XYZ Mach3 Mill; expanded G81/G82/G83; dwell seconds |
+| `mach3-mill-ms` | Mach3 Mill configured for millisecond dwell |
+| `mach4` / `mach4-mill` | Separate absolute XYZ Mach4 Mill profile; dwell seconds |
 | `linuxcnc` | LinuxCNC |
 | `haas` | Haas with controller-specific headers |
 
-**Mach3 expansion example:**
-```
-G83 R0.1 Z-0.55 Q0.25 → G00 + G01 peck moves + retracts
-```
+Mach profiles reject missing/invalid cycle parameters and unsupported operations.
+Read the [profile contract and qualification limits](docs/mach-mill.md), or
+use `swarf --post-capabilities mach4-mill` for capability JSON. These exports
+have simulator coverage; Mach runtime and hardware qualification remain pending.
 
 ## Visualization
 

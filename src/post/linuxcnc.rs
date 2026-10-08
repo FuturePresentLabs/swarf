@@ -4,12 +4,12 @@
 //! We'll keep canned cycles but may need to adjust specific parameters.
 
 use crate::codegen::GCodeOutput;
-use crate::post::PostProcessor;
+use crate::post::{Error, PostProcessor};
 
 pub struct LinuxCncPost;
 
 impl PostProcessor for LinuxCncPost {
-    fn process(&self, input: &GCodeOutput) -> GCodeOutput {
+    fn process(&self, input: &GCodeOutput) -> Result<GCodeOutput, Error> {
         let mut output_lines = vec![
             "; LinuxCNC compatible output".to_string(),
             "G20 ; Inches mode (change to G21 for metric)".to_string(),
@@ -28,11 +28,11 @@ impl PostProcessor for LinuxCncPost {
             output_lines.push(line.clone());
         }
 
-        GCodeOutput {
+        Ok(GCodeOutput {
             lines: output_lines,
             line_number: input.line_number,
             step: input.step,
-        }
+        })
     }
 
     fn name(&self) -> &str {

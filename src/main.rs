@@ -4,13 +4,13 @@
 mod ast;
 pub mod black_book;
 mod codegen;
+mod entry;
 mod lexer;
 pub mod mesh;
 mod parser;
 pub mod post;
 mod tool_library;
 mod validator;
-mod entry;
 
 #[cfg(feature = "viz")]
 mod viz;
@@ -21,7 +21,14 @@ use std::fs;
 enum Error {
     Io(std::io::Error),
     Parse(parser::ParseError),
+    Post(post::Error),
     Validation(Vec<validator::ValidationError>),
+}
+
+impl From<post::Error> for Error {
+    fn from(e: post::Error) -> Self {
+        Error::Post(e)
+    }
 }
 
 impl From<std::io::Error> for Error {
@@ -58,8 +65,12 @@ fn main() {
                     eprintln!();
                     eprintln!("Examples:");
                     eprintln!("  swarf --viz output.nc           # View G-code");
-                    eprintln!("  swarf --viz part.swarf          # View swarf file with live reload");
-                    eprintln!("  swarf --viz examples/           # Browse all .swarf files in folder");
+                    eprintln!(
+                        "  swarf --viz part.swarf          # View swarf file with live reload"
+                    );
+                    eprintln!(
+                        "  swarf --viz examples/           # Browse all .swarf files in folder"
+                    );
                     std::process::exit(1);
                 }
 
@@ -122,9 +133,28 @@ fn main() {
         "--list-posts" => {
             println!("Available post-processors:");
             println!("  generic   - Fanuc-compatible (default)");
-            println!("  mach3     - Mach3/Mach4 (expands canned cycles)");
+            print_mach_posts();
             println!("  linuxcnc  - LinuxCNC");
             println!("  haas      - Haas");
+        }
+        "--post-capabilities" => {
+            let result = args
+                .get(2)
+                .ok_or_else(|| "--post-capabilities requires a target".to_string())
+                .and_then(|name| post::PostProcessorType::parse(name))
+                .and_then(|target| {
+                    target.capabilities().ok_or_else(|| {
+                        "capability declaration currently available for Mach mill profiles only"
+                            .into()
+                    })
+                });
+            match result {
+                Ok(caps) => println!("{}", serde_json::to_string_pretty(&caps).unwrap()),
+                Err(error) => {
+                    eprintln!("Error: {error}");
+                    std::process::exit(1);
+                }
+            }
         }
         _ => {
             // Parse options
@@ -141,15 +171,14 @@ fn main() {
                 match args[i].as_str() {
                     "--post" | "-p" => {
                         if i + 1 < args.len() {
-                            post_type = match args[i + 1].as_str() {
-                                "mach3" => post::PostProcessorType::Mach3,
-                                "linuxcnc" => post::PostProcessorType::LinuxCNC,
-                                "haas" => post::PostProcessorType::Haas,
-                                _ => post::PostProcessorType::Generic,
-                            };
+                            post_type = post::PostProcessorType::parse(&args[i + 1])
+                                .unwrap_or_else(|error| {
+                                    eprintln!("Error: {error}");
+                                    std::process::exit(1);
+                                });
                             i += 2;
                         } else {
-                            eprintln!("Error: --post requires an argument (mach3, linuxcnc, haas)");
+                            eprintln!("Error: --post requires a target; see --list-posts");
                             std::process::exit(1);
                         }
                     }
@@ -241,7 +270,13 @@ fn main() {
                 None
             };
 
-            if let Err(e) = compile_with_post_and_tools(input_path, output_path, post_type, max_rpm, tool_library) {
+            if let Err(e) = compile_with_post_and_tools(
+                input_path,
+                output_path,
+                post_type,
+                max_rpm,
+                tool_library,
+            ) {
                 eprintln!("Error: {:?}", e);
                 std::process::exit(1);
             }
@@ -260,6 +295,12 @@ fn main() {
     }
 }
 
+fn print_mach_posts() {
+    println!("  mach3 / mach3-mill - Mach3 XYZ mill, dwell seconds, expanded G81/G82/G83");
+    println!("  mach3-mill-ms     - Mach3 XYZ mill configured for millisecond dwell");
+    println!("  mach4 / mach4-mill - Mach4 XYZ mill, dwell seconds, expanded G81/G82/G83");
+}
+
 fn print_usage() {
     println!("swarf - Natural language to G-code compiler");
     println!();
@@ -270,11 +311,12 @@ fn print_usage() {
     println!("  swarf --tools <file> <input.swarf>     Use tool library JSON");
     println!("  swarf --viz <path>                     Start visualizer on http://localhost:3030");
     println!("  swarf --list-posts                     List available post-processors");
+    println!("  swarf --post-capabilities <target>     Print Mach mill capability JSON");
     println!("  swarf --help                           Show this help");
     println!();
     println!("Post-processors:");
     println!("  generic   - Fanuc-compatible (default)");
-    println!("  mach3     - Mach3/Mach4 (expands canned cycles)");
+    print_mach_posts();
     println!("  linuxcnc  - LinuxCNC");
     println!("  haas      - Haas");
     println!();
@@ -308,9 +350,7 @@ fn generate_stl(input_path: &str, stl_path: &str, voxel_size: f64) -> Result<(),
     let base = stl_path.trim_end_matches(".stl");
     for (i, snap) in snapshots.iter().enumerate() {
         let snap_path = format!("{}_op{}.stl", base, i);
-        snap.mesh
-            .write_stl(&snap_path)
-            .map_err(|e| e.to_string())?;
+        snap.mesh.write_stl(&snap_path).map_err(|e| e.to_string())?;
         println!(
             "  [op {}] {} → {} ({} triangles)",
             i,
@@ -321,9 +361,7 @@ fn generate_stl(input_path: &str, stl_path: &str, voxel_size: f64) -> Result<(),
     }
 
     // Write final mesh
-    final_mesh
-        .write_stl(stl_path)
-        .map_err(|e| e.to_string())?;
+    final_mesh.write_stl(stl_path).map_err(|e| e.to_string())?;
     println!(
         "STL: {} ({} triangles, voxel {:.4})",
         stl_path,
@@ -403,7 +441,7 @@ fn compile_with_post_and_tools(
 
     // Apply post-processor
     let processor = post_type.get_processor();
-    let final_output = processor.process(&gcode_output);
+    let final_output = processor.process(&gcode_output)?;
     let gcode = final_output.to_string();
 
     // Write output
@@ -419,21 +457,23 @@ fn compile_with_post_and_tools(
 }
 
 /// Resolve tool references by looking up in tool library
-fn resolve_tools(
-    mut program: ast::Program,
-    library: &tool_library::ToolLibrary,
-) -> ast::Program {
+fn resolve_tools(mut program: ast::Program, library: &tool_library::ToolLibrary) -> ast::Program {
     for op in &mut program.operations {
         if let ast::Operation::ToolChange(ref mut tc) = op {
             // Check if this is just a reference (no tool data) or has minimal data
             let needs_lookup = tc.tool_data.is_none() || {
                 // If tool has no diameter, it needs lookup
-                tc.tool_data.as_ref().map(|d| d.diameter == 0.0).unwrap_or(true)
+                tc.tool_data
+                    .as_ref()
+                    .map(|d| d.diameter == 0.0)
+                    .unwrap_or(true)
             };
 
             if needs_lookup {
                 // First try to find by string ID if present
-                let tool_def = tc.tool_id.as_ref()
+                let tool_def = tc
+                    .tool_id
+                    .as_ref()
                     .and_then(|id| library.get_by_id(id))
                     .or_else(|| {
                         // Fall back to numeric ID lookup
@@ -451,12 +491,8 @@ fn resolve_tools(
                     });
                 } else {
                     let tool_ref_num = tc.tool_number.to_string();
-                    let tool_ref = tc.tool_id.as_deref()
-                        .unwrap_or(&tool_ref_num);
-                    eprintln!(
-                        "Warning: Tool '{}' not found in tool library",
-                        tool_ref
-                    );
+                    let tool_ref = tc.tool_id.as_deref().unwrap_or(&tool_ref_num);
+                    eprintln!("Warning: Tool '{}' not found in tool library", tool_ref);
                 }
             }
         }
@@ -467,6 +503,60 @@ fn resolve_tools(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compile_mach_profiles_preserves_existing_output_on_post_error() {
+        let dir = std::env::temp_dir().join(format!("swarf-mach-post-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("drill.swarf");
+        let output = dir.join("drill.nc");
+        fs::write(&input, "units metric\noffset 54\ntool 1 dia 6 length 50\nspindle cw rpm 2500\ndrill at x 10 y 20 depth 5 peck 0 feed 100\n").unwrap();
+        fs::write(&output, "existing verified job").unwrap();
+        let result = compile_with_post(
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+            post::PostProcessorType::Mach3,
+            None,
+        );
+        assert!(matches!(result, Err(Error::Post(_))));
+        assert_eq!(
+            fs::read_to_string(&output).unwrap(),
+            "existing verified job"
+        );
+        fs::remove_file(&output).unwrap();
+        let result = compile_with_post(
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+            post::PostProcessorType::Mach4,
+            None,
+        );
+        assert!(matches!(result, Err(Error::Post(_))));
+        assert!(!output.exists());
+        fs::write(&input, "units metric\noffset 54\ntool 1 dia 6 length 50\nspindle cw rpm 2500\ndrill at x 10 y 20 depth 5 feed 100 dwell .25\n").unwrap();
+        for target in [
+            post::PostProcessorType::Mach3,
+            post::PostProcessorType::Mach4,
+            post::PostProcessorType::Mach3Milliseconds,
+        ] {
+            compile_with_post(
+                input.to_str().unwrap(),
+                output.to_str().unwrap(),
+                target,
+                None,
+            )
+            .unwrap();
+            let code = fs::read_to_string(&output).unwrap();
+            assert!(code.contains("G01 Z-5.000000000 F100.000000000"));
+            assert!(
+                code.contains(if target == post::PostProcessorType::Mach3Milliseconds {
+                    "G04 P250.000000000"
+                } else {
+                    "G04 P0.250000000"
+                })
+            );
+        }
+        fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn test_drill_program() {

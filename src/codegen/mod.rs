@@ -471,6 +471,8 @@ impl CodeGenerator {
         // Spindle speed
         self.output.emit(&format!("S{:.0} M03", rpm));
 
+        // Establish a retract plane before lateral travel and cycle expansion.
+        self.output.emit("G00 Z0.1");
         // Move to position
         self.output.emit(&format!(
             "G00 X{:.4} Y{:.4}",
@@ -489,6 +491,7 @@ impl CodeGenerator {
             self.output
                 .emit(&format!("G81 R0.1 Z-{:.4} F{:.1}", depth, feed_rate));
         }
+        self.output.emit("G80");
     }
 
     fn emit_pocket_v2(&mut self, pocket: &PocketV2Op) {
@@ -1213,31 +1216,30 @@ impl CodeGenerator {
         // Rapid to retract height
         self.output.emit(&format!("G00 Z{:.3}", d.retract_height));
 
-        for (i, pos) in d.positions.iter().enumerate() {
-            // Rapid to position
+        for pos in &d.positions {
             self.output
                 .emit(&format!("G00 X{:.3} Y{:.3}", pos.x, pos.y));
-
-            if i == 0 {
-                // First hole: set up canned cycle
-                if let Some(peck) = d.peck_depth {
-                    // G83 peck drilling
-                    self.output.emit(&format!(
-                        "G83 Z{:.3} R{:.3} Q{:.3} F{:.1}",
-                        -d.depth, d.retract_height, peck, d.feed_rate
-                    ));
-                } else {
-                    // G81 standard drilling
-                    self.output.emit(&format!(
-                        "G81 Z{:.3} R{:.3} F{:.1}",
-                        -d.depth, d.retract_height, d.feed_rate
-                    ));
-                }
-
-                if let Some(dwell) = d.dwell {
-                    self.output.emit(&format!("G04 P{:.2}", dwell));
-                }
+            // Explicitly start each hole; a G00 cancels the previous cycle.
+            if let Some(peck) = d.peck_depth {
+                // G83 peck drilling
+                self.output.emit(&format!(
+                    "G83 Z{:.3} R{:.3} Q{:.3} F{:.1}",
+                    -d.depth, d.retract_height, peck, d.feed_rate
+                ));
+            } else if let Some(dwell) = d.dwell {
+                self.output.emit(&format!(
+                    "G82 Z{:.3} R{:.3} P{:.9} F{:.1}",
+                    -d.depth, d.retract_height, dwell, d.feed_rate
+                ));
+            } else {
+                // G81 standard drilling
+                self.output.emit(&format!(
+                    "G81 Z{:.3} R{:.3} F{:.1}",
+                    -d.depth, d.retract_height, d.feed_rate
+                ));
             }
+
+            self.output.emit("G80");
         }
 
         // Cancel canned cycle
@@ -1339,7 +1341,11 @@ impl CodeGenerator {
     }
 
     fn emit_circle_pocket(&mut self, circ: &Circle, p: &PocketOp) {
-        let tool_radius = self.current_tool_data.as_ref().map(|t| t.diameter / 2.0).unwrap_or(3.0);
+        let tool_radius = self
+            .current_tool_data
+            .as_ref()
+            .map(|t| t.diameter / 2.0)
+            .unwrap_or(3.0);
         let radius = circ.diameter / 2.0 - tool_radius;
 
         if radius < 0.0 {
@@ -1370,7 +1376,12 @@ impl CodeGenerator {
 
                 // Reach the arc start by feed before a complete circle. I/J
                 // are relative to that start, not the pocket center.
-                self.output.emit(&format!("G01 X{:.3} Y{:.3} F{:.1}", circ.center.x + r, circ.center.y, p.feed_rate));
+                self.output.emit(&format!(
+                    "G01 X{:.3} Y{:.3} F{:.1}",
+                    circ.center.x + r,
+                    circ.center.y,
+                    p.feed_rate
+                ));
                 self.output.emit(&format!(
                     "G03 X{:.3} Y{:.3} I{:.3} J{:.3} F{:.1}",
                     circ.center.x + r,
@@ -1647,6 +1658,56 @@ impl Default for GCodeOutput {
 mod tests {
     use super::*;
     #[test]
+    fn every_legacy_hole_reaches_depth_and_spot_dwell_is_at_bottom() {
+        use crate::post::{mach3::Mach3Post, PostProcessor};
+        for peck in [None, Some(2.)] {
+            let mut generator = CodeGenerator::new();
+            generator.output.emit("G90 G17 G21");
+            generator.emit_drill(&DrillOp {
+                positions: vec![
+                    Position::new(1., 2.),
+                    Position::new(4., 5.),
+                    Position::new(7., 8.),
+                ],
+                depth: 4.,
+                peck_depth: peck,
+                retract_height: 5.,
+                feed_rate: 60.,
+                dwell: if peck.is_none() { Some(0.25) } else { None },
+            });
+            let posted = Mach3Post.process(&generator.output).unwrap();
+            let sim = swarf_preview::compile(
+                &posted.to_string(),
+                &swarf_preview::Settings {
+                    family: swarf_preview::Family::Cnc,
+                    initial_xyz_mm: [0., 0., 10.],
+                    initial_e_mm: 0.,
+                    rapid_mm_min: 3000.,
+                    arc_chord_tolerance_mm: 0.02,
+                },
+            )
+            .unwrap();
+            let bottoms: Vec<_> = sim
+                .segments
+                .iter()
+                .filter(|s| s.kind == swarf_preview::Kind::Cut && s.to_mm[2] == -4.)
+                .map(|s| s.to_mm)
+                .collect();
+            assert_eq!(bottoms, vec![[1., 2., -4.], [4., 5., -4.], [7., 8., -4.]]);
+            if peck.is_none() {
+                let dwells: Vec<_> = sim
+                    .segments
+                    .iter()
+                    .filter(|s| s.kind == swarf_preview::Kind::Dwell)
+                    .collect();
+                assert_eq!(dwells.len(), 3);
+                assert!(dwells
+                    .iter()
+                    .all(|s| s.to_mm[2] == -4. && (s.end_ms - s.start_ms - 250.).abs() < 1e-6));
+            }
+        }
+    }
+    #[test]
     #[should_panic(expected = "Tool or finish allowance too large")]
     fn explicit_rectangle_rejects_tool_larger_than_cavity() {
         let mut generator = CodeGenerator::new();
@@ -1711,7 +1772,7 @@ mod tests {
                     finish_pass: finish,
                 });
                 let preview = compile(
-                    &format!("G21 G90\n{}", generator.output.to_string()),
+                    &format!("G21 G90\n{}", generator.output),
                     &Settings {
                         family: Family::Cnc,
                         initial_xyz_mm: [0., 0., 5.],
@@ -1753,21 +1814,73 @@ mod tests {
     }
     #[test]
     fn legacy_circle_replays_valid_arcs_without_rapid_stock_contact() {
-        use swarf_preview::{compile, Family, Settings, removal::{Removal,RemovalSettings}};
+        use swarf_preview::{
+            compile,
+            removal::{Removal, RemovalSettings},
+            Family, Settings,
+        };
         for diameter in [4., 18.] {
-            let mut generator=CodeGenerator::new();
-            generator.emit_tool_change(&ToolChange {tool_id:None, tool_number:1, tool_data:Some(ToolData {diameter:4.,length:20.,flutes:3,material:ToolMaterial::Carbide})});
-            generator.emit_spindle(&SpindleCommand {direction:SpindleDir::CW,rpm:1000.});
-            generator.emit_circle_pocket(&Circle {center:Position::new(20.,15.),diameter}, &PocketOp {geometry:Geometry::Circle(Circle {center:Position::new(20.,15.),diameter}),depth:4.,stepdown:2.,stepover:0.5,feed_rate:200.,plunge_feed:80.,finish_pass:None});
-            let source=format!("G21 G90\n{}",generator.output.to_string());
-            let preview=compile(&source,&Settings {family:Family::Cnc,initial_xyz_mm:[0.,0.,5.],initial_e_mm:0.,rapid_mm_min:3000.,arc_chord_tolerance_mm:0.02}).unwrap();
-            let mut stock=Removal::new(&preview,&RemovalSettings {stock_mm:[40.,30.,8.],voxel_mm:0.5,tool_number:1,tool_diameter_mm:4.,flute_length_mm:20.}).unwrap();
-            let report=stock.advance(&preview,preview.duration_ms).unwrap();
-            assert!(report.removed_mm3>0.);
+            let mut generator = CodeGenerator::new();
+            generator.emit_tool_change(&ToolChange {
+                tool_id: None,
+                tool_number: 1,
+                tool_data: Some(ToolData {
+                    diameter: 4.,
+                    length: 20.,
+                    flutes: 3,
+                    material: ToolMaterial::Carbide,
+                }),
+            });
+            generator.emit_spindle(&SpindleCommand {
+                direction: SpindleDir::CW,
+                rpm: 1000.,
+            });
+            generator.emit_circle_pocket(
+                &Circle {
+                    center: Position::new(20., 15.),
+                    diameter,
+                },
+                &PocketOp {
+                    geometry: Geometry::Circle(Circle {
+                        center: Position::new(20., 15.),
+                        diameter,
+                    }),
+                    depth: 4.,
+                    stepdown: 2.,
+                    stepover: 0.5,
+                    feed_rate: 200.,
+                    plunge_feed: 80.,
+                    finish_pass: None,
+                },
+            );
+            let source = format!("G21 G90\n{}", generator.output);
+            let preview = compile(
+                &source,
+                &Settings {
+                    family: Family::Cnc,
+                    initial_xyz_mm: [0., 0., 5.],
+                    initial_e_mm: 0.,
+                    rapid_mm_min: 3000.,
+                    arc_chord_tolerance_mm: 0.02,
+                },
+            )
+            .unwrap();
+            let mut stock = Removal::new(
+                &preview,
+                &RemovalSettings {
+                    stock_mm: [40., 30., 8.],
+                    voxel_mm: 0.5,
+                    tool_number: 1,
+                    tool_diameter_mm: 4.,
+                    flute_length_mm: 20.,
+                },
+            )
+            .unwrap();
+            let report = stock.advance(&preview, preview.duration_ms).unwrap();
+            assert!(report.removed_mm3 > 0.);
             assert!(report.rapid_contact_lines.is_empty());
         }
     }
-
 
     #[test]
     #[cfg(feature = "legacy-black-book")]

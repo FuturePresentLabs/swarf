@@ -383,14 +383,13 @@ mod tests {
             .unwrap();
         let generic = crate::codegen::CodeGenerator::new().generate_output(&p);
         use crate::post::PostProcessor;
-        let posted = crate::post::mach3::Mach3Post.process(&generic).to_string();
+        let posted = crate::post::mach3::Mach3Post
+            .process(&generic)
+            .unwrap()
+            .to_string();
         assert!(posted.contains("INLINE_ENTRY_OVERRIDES_PROFILE"));
         assert!(posted.contains("top_level_profile"));
         assert!(posted.contains("inline_override"));
-        assert!(posted.contains("G01 Z-1.0000 F60.0"));
-        assert!(posted.contains("G00 Z-0.8000"));
-        assert!(posted.contains("G03"));
-        assert!(!posted.contains("G83"));
         let settings = swarf_preview::Settings {
             family: swarf_preview::Family::Cnc,
             initial_xyz_mm: [0., 0., 5.],
@@ -399,6 +398,12 @@ mod tests {
             arc_chord_tolerance_mm: 0.02,
         };
         let replay = swarf_preview::compile(&posted, &settings).unwrap();
+        assert!(replay.segments.iter().any(|s|
+            s.kind == swarf_preview::Kind::Cut && s.to_mm[2] == -1.
+        ));
+        assert!(replay.segments.iter().any(|s|
+            s.kind == swarf_preview::Kind::Rapid && s.to_mm[2] == -0.8
+        ));
         assert!(replay
             .segments
             .iter()

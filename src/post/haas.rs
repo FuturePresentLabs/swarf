@@ -4,12 +4,12 @@
 //! We'll use standard cycles but add Haas-specific features where beneficial.
 
 use crate::codegen::GCodeOutput;
-use crate::post::PostProcessor;
+use crate::post::{Error, PostProcessor};
 
 pub struct HaasPost;
 
 impl PostProcessor for HaasPost {
-    fn process(&self, input: &GCodeOutput) -> GCodeOutput {
+    fn process(&self, input: &GCodeOutput) -> Result<GCodeOutput, Error> {
         let mut output_lines = vec![
             "%".to_string(),
             "(HAAS CNC PROGRAM)".to_string(),
@@ -38,11 +38,11 @@ impl PostProcessor for HaasPost {
         output_lines.push("M30 ; Program end and rewind".to_string());
         output_lines.push("%".to_string());
 
-        GCodeOutput {
+        Ok(GCodeOutput {
             lines: output_lines,
             line_number: input.line_number,
             step: input.step,
-        }
+        })
     }
 
     fn name(&self) -> &str {

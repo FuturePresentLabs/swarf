@@ -106,6 +106,9 @@ impl Validator {
             }
 
             Operation::Drill(d) => {
+                if d.peck_depth.is_some() && d.dwell.is_some() {
+                    return Err(ValidationError::Geometry { message: "Legacy peck drilling with bottom dwell is unsupported; omit dwell until explicit bottom-dwell expansion is available".into() });
+                }
                 if d.depth <= 0.0 {
                     return Err(ValidationError::InvalidDepth { depth: d.depth });
                 }
@@ -210,12 +213,45 @@ impl Validator {
 mod optional_tables_tests {
     #[test]
     fn default_rejects_automatic_parameters_but_accepts_explicit_feeds() {
-        let parse = |s: &str| crate::parser::Parser::new(crate::lexer::lex(s)).parse().unwrap();
+        let parse = |s: &str| {
+            crate::parser::Parser::new(crate::lexer::lex(s))
+                .parse()
+                .unwrap()
+        };
         let automatic = parse("units metric\ndrill 4 at 5 5 depth 3\n");
-        let errors = super::Validator::new().validate_program(&automatic).unwrap_err();
-        assert!(errors.iter().any(|e| e.to_string().contains("legacy-black-book")));
-        assert!(crate::black_book::BlackBook::new().list_materials().is_empty());
-        let explicit = parse("units metric\nspindle cw rpm 3000\ndrill at x 5 y 5 depth 3 retract 5 feed 60\n");
+        let errors = super::Validator::new()
+            .validate_program(&automatic)
+            .unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|e| e.to_string().contains("legacy-black-book")));
+        assert!(crate::black_book::BlackBook::new()
+            .list_materials()
+            .is_empty());
+        let explicit = parse(
+            "units metric\nspindle cw rpm 3000\ndrill at x 5 y 5 depth 3 retract 5 feed 60\n",
+        );
         super::Validator::new().validate_program(&explicit).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn peck_with_bottom_dwell_is_rejected_instead_of_dwelling_after_retract() {
+        let drill = crate::ast::Operation::Drill(crate::ast::DrillOp {
+            positions: vec![crate::ast::Position::new(1., 2.)],
+            depth: 4.,
+            peck_depth: Some(1.),
+            retract_height: 5.,
+            feed_rate: 60.,
+            dwell: Some(0.25),
+        });
+        assert!(Validator::new()
+            .validate_operation(&drill)
+            .unwrap_err()
+            .to_string()
+            .contains("bottom dwell"));
     }
 }

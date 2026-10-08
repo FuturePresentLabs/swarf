@@ -1,0 +1,10 @@
+; Bounded research fixture; explicit feeds, retract height and tools.
+units metric
+offset 54
+tool 1 dia 3 length 30
+spindle cw rpm 2000
+; Four peck-drilled holes.
+drill at grid at x 10 y 10 width 10 height 10 pitch 10 depth 4 peck 2 retract 5 feed 60
+; A spot drill with bottom dwell in seconds.
+drill at x 15 y 15 depth 1 retract 5 feed 60 dwell 0.25
+spindle off
