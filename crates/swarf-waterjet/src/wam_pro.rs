@@ -43,6 +43,11 @@ fn point(p: [f64; 2]) -> [f64; 2] {
     [rounded(p[0], 2), -rounded(p[1], 2)]
 }
 
+/// Observed pathEnd pierce-dependent dwell before abrasive shutdown.
+pub(crate) fn stop_dwell_seconds(pierce_seconds: f64) -> f64 {
+    (0.15 * pierce_seconds).floor().max(1.0)
+}
+
 pub fn research_service_post(r: &ServiceRequest) -> Result<ResearchCode, Error> {
     require(
         (4..=256).contains(&r.vertices_mm.len()),
@@ -226,7 +231,7 @@ pub fn research_service_post(r: &ServiceRequest) -> Result<ResearchCode, Error> 
             feed_mm_min: None,
         },
         Command::Dwell {
-            seconds: (0.15 * r.pierce_seconds).floor().max(1.0),
+            seconds: stop_dwell_seconds(r.pierce_seconds),
         },
         Command::AbrasiveOff,
         Command::Dwell { seconds: 1.0 },

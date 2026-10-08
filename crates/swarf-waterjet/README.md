@@ -42,7 +42,17 @@ remain false. LinuxCNC M64/M65 use immediate digital output control; the mapped
 HAL pins must be configured independently. See [digital output semantics](https://linuxcnc.org/docs/stable/html/gcode/m-code.html#sec:M62-M65).
 The postprocessor does not certify the input draft's contour policy; use
 `cam::plan` for compensated paths with leads/tabs and independently verify them.
-Existing WAZER research postprocessing is separate and unchanged.
+WAZER research postprocessing is a separate target.
+
+`wazer::Profile::Wam24ProCam` exports every authored CAM span, including open
+lead/tab spans, in the observed Pro 2.4.0 command dialect. It preserves the
+authored coordinates and feeds and emits separate pierce/start/stop sequences
+for every span. Pro metadata truncation and pierce-dependent shutdown dwell
+are applied. Time is nominal cut/pierce plus emitted shutdown dwells; it is not
+the vendor service estimate. No closing segment or repeated endpoint is added.
+This profile does not claim vendor SVG, corner-factor or geometry parity.
+The existing `Wam24ProPresegmented` service parity profile remains limited to
+one supplied closed path and retains its observed feed/timing behavior.
 
 WAZER Pro firmware compatibility and reference WAM timing remain unqualified.
 The published welcome-cut fixtures identify WAM 1.6; that alone does not prove

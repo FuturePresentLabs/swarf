@@ -46,6 +46,9 @@ fn number(value: &str) -> Result<f64, Error> {
 pub enum Profile {
     HistoricalWam16,
     Wam24ProPresegmented,
+    /// Authored CAM spans in the observed Pro dialect, without vendor geometry
+    /// or corner-feed parity. Open spans are preserved, never closed artificially.
+    Wam24ProCam,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -460,6 +463,12 @@ pub fn research_post(draft: &Draft, profile: Profile) -> Result<ResearchCode, Er
         });
     }
     label(&draft.request.material)?;
+    let pro_cam = profile == Profile::Wam24ProCam;
+    let stop_dwell = if pro_cam {
+        crate::wam_pro::stop_dwell_seconds(rebuilt.request.pierce_seconds)
+    } else {
+        1.0
+    };
     let [w, h] = draft.request.cutting_area_width_depth_mm;
     let mut commands = vec![
         Command::Absolute,
@@ -471,13 +480,24 @@ pub fn research_post(draft: &Draft, profile: Profile) -> Result<ResearchCode, Er
             seconds: draft.request.pierce_seconds,
         },
         Command::Version {
-            value: "1.6".into(),
+            value: if pro_cam { "2.4.0" } else { "1.6" }.into(),
         },
         Command::Material {
-            value: draft.request.material.clone(),
+            value: if pro_cam {
+                draft.request.material.chars().take(20).collect()
+            } else {
+                draft.request.material.clone()
+            },
         },
         Command::Thickness {
-            value: format!("{} mm", draft.request.thickness_mm),
+            value: if pro_cam {
+                format!("{} mm", draft.request.thickness_mm)
+                    .chars()
+                    .take(20)
+                    .collect()
+            } else {
+                format!("{} mm", draft.request.thickness_mm)
+            },
         },
     ];
     for op in &rebuilt.operations {
@@ -493,7 +513,9 @@ pub fn research_post(draft: &Draft, profile: Profile) -> Result<ResearchCode, Er
                 feed_mm_min: Some(*feed_mm_min),
             }),
             Operation::Stop => commands.extend([
-                Command::Dwell { seconds: 1.0 },
+                Command::Dwell {
+                    seconds: stop_dwell,
+                },
                 Command::AbrasiveOff,
                 Command::Dwell { seconds: 1.0 },
                 Command::JetOff,
@@ -504,7 +526,7 @@ pub fn research_post(draft: &Draft, profile: Profile) -> Result<ResearchCode, Er
     // Display estimate includes cut/pierce plus three observed stop dwells per
     // contour. Rapid travel, acceleration and real hydraulics are excluded.
     let seconds = (rebuilt.nominal_cut_and_pierce_seconds
-        + 3.0 * rebuilt.request.contours.len() as f64)
+        + (stop_dwell + 2.0) * rebuilt.request.contours.len() as f64)
         .ceil();
     require(
         seconds.is_finite() && (0.0..=359999.0).contains(&seconds),
@@ -534,15 +556,28 @@ pub fn research_post(draft: &Draft, profile: Profile) -> Result<ResearchCode, Er
         "candidate differs from typed program",
     )?;
     Ok(ResearchCode {
-        schema:"swarf.wazer-research-code.v1".into(),profile,program,gcode,summary,
-        machine_output_enabled:false,controller_qualified:false,
-        blockers:vec![
+        schema: "swarf.wazer-research-code.v1".into(),
+        profile,
+        program,
+        gcode,
+        summary,
+        machine_output_enabled: false,
+        controller_qualified: false,
+        blockers: if pro_cam {
+            vec![
+            "Authored CAM spans in the observed WAM2.4 Pro command dialect; no vendor SVG, kerf, tabs, corner-feed, duplicate endpoint or displayed-time parity is claimed.".into(),
+            "Job time is nominal authored cut/pierce plus emitted stop dwells; rapid travel, acceleration and physical hydraulics are excluded.".into(),
+            "Exact Pro controller firmware, machine extents and hydraulic behavior remain unqualified.".into(),
+        ]
+        } else {
+            vec![
             "Historical WAM1.6 reference syntax only; current client2.4.0 and installed firmware compatibility unqualified.".into(),
             "Centrelines only: no kerf/leads/tabs/order/quality/corner qualification or verified mechanical stock.".into(),
             "Header extents use the full declared cutting area; machine preview/envelope behavior and material-label interpretation remain unqualified.".into(),
             "Three 1-second stop dwells reflect historical samples, not calibrated pressure-release/clutch/relief behavior.".into(),
             "Numeric output preserves f64 roundtrip; controller precision and current client formatting parity unqualified. Job time excludes rapid/acceleration/hydraulic timing.".into(),
-        ],
+        ]
+        },
     })
 }
 
@@ -568,6 +603,29 @@ mod tests {
             }],
         })
         .unwrap()
+    }
+    #[test]
+    fn pro_cam_preserves_open_spans_and_authored_feeds_with_scaled_stops() {
+        let mut request = draft().request;
+        request.pierce_seconds = 27.0;
+        let mut second = request.contours[0].clone();
+        second.source_id = "second".into();
+        second.profile = vec![transmog_core::ir::SketchSegment::Line {
+            start: transmog_core::geometry::Point2::new(20.0, -2.0),
+            end: transmog_core::geometry::Point2::new(30.0, -2.0),
+        }];
+        request.contours.push(second);
+        let draft = crate::compile(request).unwrap();
+        let code = research_post(&draft, Profile::Wam24ProCam).unwrap();
+        assert_eq!(code.summary.path_count, 2);
+        assert_eq!(code.summary.linear_count, 2);
+        assert_eq!(code.summary.total_dwell_seconds, 66.0);
+        assert_eq!(code.summary.declared_version, "2.4.0");
+        assert!(code.gcode.contains("G4 S4\r\nM9\r\nG4 S1\r\nM5\r\n"));
+        assert!(code.gcode.contains("G1 X30 Y-2 F120\r\n"));
+        assert_eq!(parse(&code.gcode).unwrap(), code.program);
+        assert!(!code.machine_output_enabled && !code.controller_qualified);
+        assert!(research_post(&draft, Profile::Wam24ProPresegmented).is_err());
     }
     #[test]
     fn research_post_preserves_motion_and_explicit_feeds_and_shutdown() {
