@@ -1298,11 +1298,12 @@ impl CodeGenerator {
             )
         };
         let (min_x, max_x, min_y, max_y) = bounds(allowance);
-        if min_x > max_x || min_y > max_y {
-            self.output
-                .emit_comment("ERROR: Tool or finish allowance too large for pocket");
-            return;
-        }
+        // The legacy generator API returns String; reject rather than emitting
+        // a successful-looking program with the pocket silently omitted.
+        assert!(
+            min_x <= max_x && min_y <= max_y,
+            "Tool or finish allowance too large for rectangular pocket"
+        );
         let passes = ((max_y - min_y) / (2.0 * radius * p.stepover))
             .ceil()
             .max(1.0) as usize;
@@ -1645,6 +1646,30 @@ impl Default for GCodeOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[should_panic(expected = "Tool or finish allowance too large")]
+    fn explicit_rectangle_rejects_tool_larger_than_cavity() {
+        let mut generator = CodeGenerator::new();
+        let rect = Rectangle {
+            bottom_left: Position::new(0., 0.),
+            width: 2.,
+            height: 2.,
+            corner_radius: None,
+            rotation: 0.,
+        };
+        generator.emit_rect_pocket(
+            &rect,
+            &PocketOp {
+                geometry: Geometry::Rect(rect.clone()),
+                depth: 1.,
+                stepdown: 1.,
+                stepover: 0.5,
+                feed_rate: 200.,
+                plunge_feed: 80.,
+                finish_pass: None,
+            },
+        );
+    }
     #[test]
     fn explicit_rectangle_matches_rounded_nominal_without_in_stock_rapids() {
         use swarf_preview::{
