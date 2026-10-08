@@ -42,6 +42,18 @@ impl Parser {
 
     /// Parse the full program
     pub fn parse(&mut self) -> Result<Program> {
+        if let Some(position) = self
+            .tokens
+            .iter()
+            .position(|(token, _)| *token == Token::Invalid)
+        {
+            self.position = position;
+            self.current_line = 1 + self.tokens[..position]
+                .iter()
+                .filter(|(token, _)| *token == Token::Newline)
+                .count();
+            return Err(self.error("invalid source character"));
+        }
         let header = self.parse_header()?;
         let operations = self.parse_operations()?;
         let footer = Footer {
@@ -219,9 +231,7 @@ impl Parser {
                 Some(Token::Chamfer) => Operation::Chamfer(self.parse_chamfer()?),
                 Some(Token::Deburr) => Operation::Deburr(self.parse_deburr()?),
                 Some(_) => {
-                    // Unknown token, skip for now
-                    self.advance();
-                    continue;
+                    return Err(self.error("unsupported or unexpected token"));
                 }
                 None => break,
             };
@@ -1178,6 +1188,7 @@ impl Parser {
     fn parse_setup_block(&mut self) -> Result<SetupBlock> {
         self.consume(Token::Setup)?;
         self.consume(Token::LBrace)?;
+        self.skip_newlines();
 
         let mut zero = ZeroConfig {
             x_ref: XRef::Left,
@@ -1777,6 +1788,17 @@ impl Parser {
 mod tests {
     use super::*;
     use crate::lexer::lex;
+
+    #[test]
+    fn malformed_source_cannot_be_silently_discarded() {
+        for source in [
+            "units metric\n@",
+            "units metric\nunknown-operation",
+            "units metric\ndrill at x 1 y 2 depth 3 feed 1e3",
+        ] {
+            assert!(Parser::new(lex(source)).parse().is_err(), "{source}");
+        }
+    }
 
     #[test]
     fn test_parse_new_dsl_syntax() {

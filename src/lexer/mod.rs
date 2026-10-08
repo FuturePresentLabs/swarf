@@ -6,7 +6,7 @@ use logos::Logos;
 /// Natural-ish language that machinists can read/write quickly
 
 #[derive(Logos, Debug, Clone, PartialEq)]
-#[logos(skip r"[ \t\f]+")] // Skip whitespace
+#[logos(skip r"[ \t\f\r]+")] // Skip whitespace, including CRLF carriage returns
 #[logos(error = LexerError)]
 pub enum Token {
     #[token("plunge-profile")]
@@ -20,8 +20,12 @@ pub enum Token {
     #[token("direct")]
     Direct,
     // Literals
-    #[regex(r"-?\d+\.?\d*", |lex| lex.slice().parse::<f64>().ok())]
+    #[regex(r"-?(\d+\.?\d*|\.\d+)", |lex| lex.slice().parse::<f64>().ok())]
     Number(Option<f64>),
+
+    // Also used for lexer errors so the parser cannot silently drop bad source.
+    #[token("\0")]
+    Invalid,
 
     // Fractions like 5/8, 1/4
     #[regex(r"\d+/\d+", |lex| {
@@ -352,7 +356,6 @@ pub enum Token {
     Identifier(String),
 
     // Newlines for statement separation
-    #[regex(r"\n\s*\n", logos::skip)] // Skip blank lines
     #[token("\n")]
     Newline,
 
@@ -378,16 +381,34 @@ impl std::error::Error for LexerError {}
 pub fn lex(input: &str) -> Vec<(Token, logos::Span)> {
     Token::lexer(input)
         .spanned()
-        .filter_map(|(result, span)| match result {
-            Ok(token) => Some((token, span)),
-            Err(_) => None, // Skip errors for now
-        })
+        .map(|(result, span)| (result.unwrap_or(Token::Invalid), span))
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn leading_decimals_keep_their_value_and_invalid_characters_survive() {
+        let tokens: Vec<_> = lex(".25 -.5 5. 1/4 @")
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Number(Some(0.25)),
+                Token::Number(Some(-0.5)),
+                Token::Number(Some(5.)),
+                Token::Fraction(Some(0.25)),
+                Token::Invalid
+            ]
+        );
+        assert!(!lex("units metric\r\n")
+            .iter()
+            .any(|(token, _)| *token == Token::Invalid));
+    }
 
     #[test]
     fn test_basic_tokens() {
