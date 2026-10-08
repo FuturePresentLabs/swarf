@@ -5,6 +5,7 @@
 
 use crate::codegen::GCodeOutput;
 
+pub mod embedded;
 pub mod haas;
 pub mod linuxcnc;
 pub mod mach3;
@@ -27,6 +28,8 @@ pub struct Capabilities {
     pub rejected: &'static [&'static str],
     pub max_pecks_per_hole: usize,
     pub schema: &'static str,
+    pub controller_reference: &'static str,
+    pub runtime_qualified: bool,
     pub hardware_qualified: bool,
 }
 
@@ -52,6 +55,10 @@ pub enum PostProcessorType {
     Mach3,   // Explicit absolute XYZ mill profile, dwell seconds
     Mach3Milliseconds,
     Mach4,
+    GrblHalMill,
+    FluidNcMill,
+    GrblHalLaser,
+    FluidNcLaser,
     LinuxCNC, // LinuxCNC (full Fanuc + extensions)
     Haas,     // Haas (Fanuc + Haas specifics)
 }
@@ -64,6 +71,18 @@ impl PostProcessorType {
             PostProcessorType::Mach3 => Box::new(mach3::Mach3Post),
             PostProcessorType::Mach3Milliseconds => Box::new(mach3::Mach3MillisecondsPost),
             PostProcessorType::Mach4 => Box::new(mach3::Mach4Post),
+            PostProcessorType::GrblHalMill => {
+                Box::new(embedded::MillPost(embedded::Controller::Grblhal))
+            }
+            PostProcessorType::FluidNcMill => {
+                Box::new(embedded::MillPost(embedded::Controller::Fluidnc))
+            }
+            PostProcessorType::GrblHalLaser => {
+                Box::new(embedded::LaserPost(embedded::Controller::Grblhal))
+            }
+            PostProcessorType::FluidNcLaser => {
+                Box::new(embedded::LaserPost(embedded::Controller::Fluidnc))
+            }
             PostProcessorType::LinuxCNC => Box::new(linuxcnc::LinuxCncPost),
             PostProcessorType::Haas => Box::new(haas::HaasPost),
         }
@@ -75,6 +94,10 @@ impl PostProcessorType {
             "mach3" | "mach3-mill" => Ok(Self::Mach3),
             "mach3-mill-ms" => Ok(Self::Mach3Milliseconds),
             "mach4" | "mach4-mill" => Ok(Self::Mach4),
+            "grblhal-mill" => Ok(Self::GrblHalMill),
+            "fluidnc-mill" => Ok(Self::FluidNcMill),
+            "grblhal-laser" => Ok(Self::GrblHalLaser),
+            "fluidnc-laser" => Ok(Self::FluidNcLaser),
             "linuxcnc" => Ok(Self::LinuxCNC),
             "haas" => Ok(Self::Haas),
             _ => Err(format!("unknown postprocessor: {name}")),
@@ -82,6 +105,61 @@ impl PostProcessorType {
     }
 
     pub fn capabilities(self) -> Option<Capabilities> {
+        if matches!(
+            self,
+            Self::GrblHalMill | Self::FluidNcMill | Self::GrblHalLaser | Self::FluidNcLaser
+        ) {
+            let laser = matches!(self, Self::GrblHalLaser | Self::FluidNcLaser);
+            return Some(Capabilities {
+                target: match self {
+                    Self::GrblHalMill => "grblhal-mill",
+                    Self::FluidNcMill => "fluidnc-mill",
+                    Self::GrblHalLaser => "grblhal-laser",
+                    _ => "fluidnc-laser",
+                },
+                process: if laser {
+                    if self == Self::GrblHalLaser {
+                        "typed XY laser paths; M4 dynamic power; explicit S/feed/work bounds; actual grblHAL $30 must match max_s and $32 must enable laser mode"
+                    } else {
+                        "typed XY laser paths; M4 dynamic power; explicit S/feed/work bounds; active FluidNC Laser spindle and actual speed_map full scale must match max_s"
+                    }
+                } else {
+                    "absolute XYZ milling; incremental arc centers; manual Tn M6 becomes spindle/coolant off and mandatory M0 pause; controller mill mode required"
+                },
+                expanded_cycles: if laser { &[] } else { &[81, 82, 83] },
+                dwell_unit: "seconds",
+                source_dwell_unit: "seconds",
+                rejected: if laser {
+                    &[
+                        "mill compiler input",
+                        "Z/rotary motion",
+                        "dwell/pierce",
+                        "implicit power limits",
+                        "raster/arc input",
+                        "waterjet",
+                    ]
+                } else {
+                    &[
+                        "G43 stored tool offsets",
+                        "G90.1 absolute arc centers",
+                        "M1 optional stop",
+                        "M4 reverse spindle",
+                        "automatic tool changes",
+                        "unsupported cycles/macros/rotary/turning",
+                        "laser-configured spindle",
+                    ]
+                },
+                max_pecks_per_hole: if laser { 0 } else { mach_mill::MAX_PECKS },
+                schema: "swarf.post-capabilities.v1",
+                controller_reference: if matches!(self, Self::GrblHalMill | Self::GrblHalLaser) {
+                    "grblHAL/core c3a887e3e366f91e26813bb6072479d719cac83a; driver/configuration unqualified"
+                } else {
+                    "FluidNC v4.1.1; spindle/configuration unqualified"
+                },
+                runtime_qualified: false,
+                hardware_qualified: false,
+            });
+        }
         let (target, dwell_unit) = match self {
             Self::Mach3 => ("mach3-mill", "seconds"),
             Self::Mach3Milliseconds => ("mach3-mill-ms", "milliseconds"),
@@ -105,6 +183,12 @@ impl PostProcessorType {
             ],
             max_pecks_per_hole: mach_mill::MAX_PECKS,
             schema: "swarf.post-capabilities.v1",
+            controller_reference: if self == Self::Mach4 {
+                "Mach4 Mill G-code Programming Guide v1.0"
+            } else {
+                "Using Mach3Mill rev 1.84-A2"
+            },
+            runtime_qualified: false,
             hardware_qualified: false,
         })
     }

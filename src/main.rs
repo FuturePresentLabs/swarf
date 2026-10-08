@@ -16,6 +16,7 @@ mod validator;
 mod viz;
 
 use std::fs;
+use std::io::Read;
 
 #[derive(Debug)]
 enum Error {
@@ -144,7 +145,7 @@ fn main() {
                 .and_then(|name| post::PostProcessorType::parse(name))
                 .and_then(|target| {
                     target.capabilities().ok_or_else(|| {
-                        "capability declaration currently available for Mach mill profiles only"
+                        "capability declaration unavailable for this legacy passthrough profile"
                             .into()
                     })
                 });
@@ -154,6 +155,36 @@ fn main() {
                     eprintln!("Error: {error}");
                     std::process::exit(1);
                 }
+            }
+        }
+        "--laser-job" => {
+            let result = (|| -> Result<(), String> {
+                if args.len() != 5 || args[3] != "-o" {
+                    return Err("usage: swarf --laser-job <job.json> -o <output.nc>".into());
+                }
+                let mut bytes = Vec::new();
+                fs::File::open(&args[2])
+                    .map_err(|e| e.to_string())?
+                    .take(8 * 1024 * 1024 + 1)
+                    .read_to_end(&mut bytes)
+                    .map_err(|e| e.to_string())?;
+                if bytes.len() > 8 * 1024 * 1024 {
+                    return Err("laser job exceeds 8 MiB".into());
+                }
+                let job: post::embedded::LaserJob =
+                    serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+                let output = post::embedded::laser_export(&job).map_err(|e| e.to_string())?;
+                fs::write(&args[4], output.to_string()).map_err(|e| e.to_string())?;
+                println!(
+                    "Generated: {} ({} XY laser research export)",
+                    args[4],
+                    job.controller.name()
+                );
+                Ok(())
+            })();
+            if let Err(error) = result {
+                eprintln!("Error: {error}");
+                std::process::exit(1);
             }
         }
         _ => {
@@ -299,6 +330,10 @@ fn print_mach_posts() {
     println!("  mach3 / mach3-mill - Mach3 XYZ mill, dwell seconds, expanded G81/G82/G83");
     println!("  mach3-mill-ms     - Mach3 XYZ mill configured for millisecond dwell");
     println!("  mach4 / mach4-mill - Mach4 XYZ mill, dwell seconds, expanded G81/G82/G83");
+    println!("  grblhal-mill / fluidnc-mill - XYZ mill, mandatory manual tool pauses");
+    println!(
+        "  grblhal-laser / fluidnc-laser - typed --laser-job input only, explicit power limits"
+    );
 }
 
 fn print_usage() {
@@ -311,7 +346,8 @@ fn print_usage() {
     println!("  swarf --tools <file> <input.swarf>     Use tool library JSON");
     println!("  swarf --viz <path>                     Start visualizer on http://localhost:3030");
     println!("  swarf --list-posts                     List available post-processors");
-    println!("  swarf --post-capabilities <target>     Print Mach mill capability JSON");
+    println!("  swarf --post-capabilities <target>     Print bounded profile capability JSON");
+    println!("  swarf --laser-job <job.json> -o <out>   Export typed XY laser paths");
     println!("  swarf --help                           Show this help");
     println!();
     println!("Post-processors:");

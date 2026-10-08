@@ -4,22 +4,22 @@ use super::Error;
 use crate::codegen::GCodeOutput;
 
 pub(super) const MAX_PECKS: usize = 10_000;
-const MAX_LINES: usize = 1_000_000;
+pub(super) const MAX_LINES: usize = 1_000_000;
 
 #[derive(Default)]
-struct Block {
-    words: Vec<(char, f64)>,
-    comments: Vec<String>,
+pub(super) struct Block {
+    pub(super) words: Vec<(char, f64)>,
+    pub(super) comments: Vec<String>,
 }
 impl Block {
-    fn get(&self, key: char) -> Option<f64> {
+    pub(super) fn get(&self, key: char) -> Option<f64> {
         self.words.iter().find(|w| w.0 == key).map(|w| w.1)
     }
-    fn has_g(&self, value: f64) -> bool {
+    pub(super) fn has_g(&self, value: f64) -> bool {
         self.words.contains(&('G', value))
     }
 }
-fn parse(line: &str) -> Result<Block, String> {
+pub(super) fn parse(line: &str) -> Result<Block, String> {
     if !line.is_ascii() {
         return Err("non-ASCII source block".into());
     }

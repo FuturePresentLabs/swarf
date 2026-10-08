@@ -1,0 +1,11 @@
+{
+  "schema": "swarf.laser-job.v1",
+  "controller": "fluidnc",
+  "max_s": 1000.0,
+  "max_feed_mm_min": 1500.0,
+  "bounds_mm": [[0.0, 0.0], [100.0, 100.0]],
+  "paths": [
+    {"points_mm": [[10.0, 10.0], [20.0, 10.0], [20.0, 20.0], [10.0, 20.0], [10.0, 10.0]], "feed_mm_min": 600.0, "power_s": 250.0},
+    {"points_mm": [[30.0, 30.0], [40.0, 30.0]], "feed_mm_min": 1200.0, "power_s": 500.0}
+  ]
+}

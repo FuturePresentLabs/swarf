@@ -1,0 +1,111 @@
+; FluidNC Mill; manual tool pauses; not hardware qualified
+; FluidNC Mill; absolute XYZ mill; research export, not hardware qualified
+; Source dwell seconds; G99 default; G83 reentry clearance 0.05 mm
+G94 G91.1
+; PROGRAM START
+G90 G17 G40 G49 G80
+G21
+G54
+; TOOL CHANGE - T1
+M5
+M9
+M5
+M9
+; Install tool T1; re-establish work Z before resuming
+M0
+; TOOL DATA: DIA=3 LEN=30 FLUTES=2 MAT=Carbide
+S2000 M3
+; DRILL CYCLE
+G0 Z5
+G0 X10 Y10
+G0 X10 Y10
+G0 Z5
+G1 Z3 F60
+G0 Z5
+G0 Z3.05
+G1 Z1 F60
+G0 Z5
+G0 Z1.05
+G1 Z-1 F60
+G0 Z5
+G0 Z-0.95
+G1 Z-3 F60
+G0 Z5
+G0 Z-2.95
+G1 Z-4 F60
+G0 Z5
+G80
+G0 X20 Y10
+G0 X20 Y10
+G0 Z5
+G1 Z3 F60
+G0 Z5
+G0 Z3.05
+G1 Z1 F60
+G0 Z5
+G0 Z1.05
+G1 Z-1 F60
+G0 Z5
+G0 Z-0.95
+G1 Z-3 F60
+G0 Z5
+G0 Z-2.95
+G1 Z-4 F60
+G0 Z5
+G80
+G0 X10 Y20
+G0 X10 Y20
+G0 Z5
+G1 Z3 F60
+G0 Z5
+G0 Z3.05
+G1 Z1 F60
+G0 Z5
+G0 Z1.05
+G1 Z-1 F60
+G0 Z5
+G0 Z-0.95
+G1 Z-3 F60
+G0 Z5
+G0 Z-2.95
+G1 Z-4 F60
+G0 Z5
+G80
+G0 X20 Y20
+G0 X20 Y20
+G0 Z5
+G1 Z3 F60
+G0 Z5
+G0 Z3.05
+G1 Z1 F60
+G0 Z5
+G0 Z1.05
+G1 Z-1 F60
+G0 Z5
+G0 Z-0.95
+G1 Z-3 F60
+G0 Z5
+G0 Z-2.95
+G1 Z-4 F60
+G0 Z5
+G80
+G80
+G0 Z5
+; DRILL CYCLE
+G0 Z5
+G0 X15 Y15
+G0 X15 Y15
+G0 Z5
+G1 Z-1 F60
+G4 P0.25
+G0 Z5
+G80
+G80
+G0 Z5
+M5
+; PROGRAM END
+G0 Z50
+G0 X0 Y0
+M5
+M9
+M30

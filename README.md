@@ -202,6 +202,8 @@ swarf generates controller-specific G-code:
 | `mach3` / `mach3-mill` | Absolute XYZ Mach3 Mill; expanded G81/G82/G83; dwell seconds |
 | `mach3-mill-ms` | Mach3 Mill configured for millisecond dwell |
 | `mach4` / `mach4-mill` | Separate absolute XYZ Mach4 Mill profile; dwell seconds |
+| `grblhal-mill` / `fluidnc-mill` | Bounded absolute XYZ mill; expanded cycles; mandatory manual tool pauses |
+| `grblhal-laser` / `fluidnc-laser` | Separate typed XY laser jobs with explicit power/feed bounds; use `--laser-job` |
 | `linuxcnc` | LinuxCNC |
 | `haas` | Haas with controller-specific headers |
 
@@ -209,6 +211,11 @@ Mach profiles reject missing/invalid cycle parameters and unsupported operations
 Read the [profile contract and qualification limits](docs/mach-mill.md), or
 use `swarf --post-capabilities mach4-mill` for capability JSON. These exports
 have simulator coverage; Mach runtime and hardware qualification remain pending.
+
+[Embedded controller contracts](docs/embedded-posts.md) cover separate mill/laser
+semantics, manual tool handling, controller version/configuration assumptions,
+127-byte output blocks, and typed laser JSON. Embedded runtime and hardware
+qualification remain pending; mill output cannot be relabelled as a laser job.
 
 ## Visualization
 
