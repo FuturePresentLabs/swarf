@@ -1283,68 +1283,57 @@ impl CodeGenerator {
     }
 
     fn emit_rect_pocket(&mut self, rect: &Rectangle, p: &PocketOp) {
-        let tool_radius = 3.0; // Assume 6mm tool for now
-        let stepover_dist = tool_radius * 2.0 * p.stepover;
-
-        // Calculate pocket bounds (inside tool center)
-        let min_x = rect.bottom_left.x + tool_radius;
-        let max_x = rect.bottom_left.x + rect.width - tool_radius;
-        let min_y = rect.bottom_left.y + tool_radius;
-        let max_y = rect.bottom_left.y + rect.height - tool_radius;
-
-        let num_passes = ((max_y - min_y) / stepover_dist).ceil() as i32;
-
-        // Spiral down by stepdown
-        let num_depth_passes = (p.depth / p.stepdown).ceil() as i32;
-
-        for depth_pass in 1..=num_depth_passes {
-            let current_z = -(depth_pass as f64 * p.stepdown).min(p.depth);
-
+        let radius = self
+            .current_tool_data
+            .as_ref()
+            .map(|t| t.diameter / 2.0)
+            .unwrap_or(3.0);
+        let allowance = p.finish_pass.unwrap_or(0.0);
+        let bounds = |leave: f64| {
+            (
+                rect.bottom_left.x + radius + leave,
+                rect.bottom_left.x + rect.width - radius - leave,
+                rect.bottom_left.y + radius + leave,
+                rect.bottom_left.y + rect.height - radius - leave,
+            )
+        };
+        let (min_x, max_x, min_y, max_y) = bounds(allowance);
+        if min_x > max_x || min_y > max_y {
             self.output
-                .emit_comment(&format!("DEPTH PASS {} Z={:.3}", depth_pass, current_z));
-
-            // Plunge to depth
-            self.output
-                .emit(&format!("G01 Z{:.3} F{:.1}", current_z, p.plunge_feed));
-
-            // Zigzag pattern
-            for i in 0..=num_passes {
-                let y = min_y + i as f64 * stepover_dist;
-                if y > max_y {
-                    break;
-                }
-
-                let x_start = if i % 2 == 0 { min_x } else { max_x };
-                let x_end = if i % 2 == 0 { max_x } else { min_x };
-
-                // Move to start of pass
-                self.output.emit(&format!("G00 X{:.3} Y{:.3}", x_start, y));
-
-                // Cut across
-                self.output
-                    .emit(&format!("G01 X{:.3} F{:.1}", x_end, p.feed_rate));
-            }
+                .emit_comment("ERROR: Tool or finish allowance too large for pocket");
+            return;
         }
-
-        // Finish pass if specified
-        if let Some(allowance) = p.finish_pass {
-            self.output.emit_comment("FINISH PASS");
-            // Simple finish: traverse perimeter
-            let finish_z = -p.depth;
+        let passes = ((max_y - min_y) / (2.0 * radius * p.stepover))
+            .ceil()
+            .max(1.0) as usize;
+        // Position only above stock. All in-stock connectors are feed moves.
+        self.output.emit("G00 Z50.0");
+        self.output
+            .emit(&format!("G00 X{:.3} Y{:.3}", min_x, min_y));
+        self.output.emit("G00 Z5.0");
+        for depth_pass in 1..=(p.depth / p.stepdown).ceil() as usize {
+            let z = -(depth_pass as f64 * p.stepdown).min(p.depth);
+            self.output.emit(&format!(
+                "G01 X{:.3} Y{:.3} F{:.1}",
+                min_x, min_y, p.feed_rate
+            ));
             self.output
-                .emit(&format!("G01 Z{:.3} F{:.1}", finish_z, p.plunge_feed));
-
-            let fx = rect.bottom_left.x + allowance;
-            let fy = rect.bottom_left.y + allowance;
-            let fw = rect.width - allowance * 2.0;
-            let fh = rect.height - allowance * 2.0;
-
-            self.output
-                .emit(&format!("G01 X{:.3} Y{:.3} F{:.1}", fx, fy, p.feed_rate));
-            self.output.emit(&format!("G01 X{:.3}", fx + fw));
-            self.output.emit(&format!("G01 Y{:.3}", fy + fh));
-            self.output.emit(&format!("G01 X{:.3}", fx));
-            self.output.emit(&format!("G01 Y{:.3}", fy));
+                .emit(&format!("G01 Z{:.3} F{:.1}", z, p.plunge_feed));
+            for i in 0..=passes {
+                let y = min_y + (max_y - min_y) * i as f64 / passes as f64;
+                let x = if i % 2 == 0 { max_x } else { min_x };
+                self.output
+                    .emit(&format!("G01 Y{:.3} F{:.1}", y, p.feed_rate));
+                self.output
+                    .emit(&format!("G01 X{:.3} F{:.1}", x, p.feed_rate));
+            }
+            if p.finish_pass.is_some() {
+                let (x0, x1, y0, y1) = bounds(0.0);
+                for (x, y) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)] {
+                    self.output
+                        .emit(&format!("G01 X{:.3} Y{:.3} F{:.1}", x, y, p.feed_rate));
+                }
+            }
         }
     }
 
@@ -1656,6 +1645,87 @@ impl Default for GCodeOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn explicit_rectangle_matches_rounded_nominal_without_in_stock_rapids() {
+        use swarf_preview::{
+            compile,
+            removal::{Removal, RemovalSettings},
+            Family, Settings,
+        };
+        for diameter in [4., 6.] {
+            for finish in [None, Some(0.4)] {
+                let mut generator = CodeGenerator::new();
+                generator.emit_tool_change(&ToolChange {
+                    tool_id: None,
+                    tool_number: 1,
+                    tool_data: Some(ToolData {
+                        diameter,
+                        length: 20.,
+                        flutes: 3,
+                        material: ToolMaterial::Carbide,
+                    }),
+                });
+                generator.emit_spindle(&SpindleCommand {
+                    direction: SpindleDir::CW,
+                    rpm: 1000.,
+                });
+                let rect = Rectangle {
+                    bottom_left: Position::new(4., 5.),
+                    width: 12.,
+                    height: 10.,
+                    corner_radius: None,
+                    rotation: 0.,
+                };
+                generator.emit_pocket(&PocketOp {
+                    geometry: Geometry::Rect(rect),
+                    depth: 3.,
+                    stepdown: 2.,
+                    stepover: 0.5,
+                    feed_rate: 200.,
+                    plunge_feed: 80.,
+                    finish_pass: finish,
+                });
+                let preview = compile(
+                    &format!("G21 G90\n{}", generator.output.to_string()),
+                    &Settings {
+                        family: Family::Cnc,
+                        initial_xyz_mm: [0., 0., 5.],
+                        initial_e_mm: 0.,
+                        rapid_mm_min: 3000.,
+                        arc_chord_tolerance_mm: 0.02,
+                    },
+                )
+                .unwrap();
+                let cfg = RemovalSettings {
+                    stock_mm: [20., 20., 6.],
+                    voxel_mm: 0.5,
+                    tool_number: 1,
+                    tool_diameter_mm: diameter,
+                    flute_length_mm: 20.,
+                };
+                let mut stock = Removal::new(&preview, &cfg).unwrap();
+                let initial = stock.occupied_centers();
+                let radius = diameter / 2.;
+                let expected: std::collections::BTreeSet<_> = initial
+                    .into_iter()
+                    .filter(|p| {
+                        let x = ((p[0] - 10.).abs() - (6. - radius)).max(0.);
+                        let y = ((p[1] - 10.).abs() - (5. - radius)).max(0.);
+                        !(p[2] >= -3. && x.hypot(y) <= radius)
+                    })
+                    .map(|p| p.map(f64::to_bits))
+                    .collect();
+                let report = stock.advance(&preview, preview.duration_ms).unwrap();
+                assert!(report.rapid_contact_lines.is_empty());
+                let actual: std::collections::BTreeSet<_> = stock
+                    .occupied_centers()
+                    .into_iter()
+                    .map(|p| p.map(f64::to_bits))
+                    .collect();
+                assert_eq!(actual, expected, "diameter {diameter}, finish {finish:?}");
+            }
+        }
+    }
     #[test]
     fn legacy_circle_replays_valid_arcs_without_rapid_stock_contact() {
         use swarf_preview::{compile, Family, Settings, removal::{Removal,RemovalSettings}};
